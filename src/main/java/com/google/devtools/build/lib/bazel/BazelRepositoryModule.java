@@ -34,34 +34,30 @@ import com.google.devtools.build.lib.bazel.repository.HttpDownloadValue;
 import com.google.devtools.build.lib.bazel.repository.HttpFileFunction;
 import com.google.devtools.build.lib.bazel.repository.HttpJarFunction;
 import com.google.devtools.build.lib.bazel.repository.JarFunction;
-import com.google.devtools.build.lib.bazel.repository.LocalRepositoryFunction;
 import com.google.devtools.build.lib.bazel.repository.MavenJarFunction;
 import com.google.devtools.build.lib.bazel.repository.MavenServerFunction;
 import com.google.devtools.build.lib.bazel.repository.NewGitRepositoryFunction;
 import com.google.devtools.build.lib.bazel.repository.NewHttpArchiveFunction;
-import com.google.devtools.build.lib.bazel.repository.NewLocalRepositoryFunction;
-import com.google.devtools.build.lib.bazel.repository.RepositoryDelegatorFunction;
-import com.google.devtools.build.lib.bazel.repository.RepositoryFunction;
 import com.google.devtools.build.lib.bazel.repository.TarGzFunction;
 import com.google.devtools.build.lib.bazel.repository.ZipFunction;
-import com.google.devtools.build.lib.bazel.rules.android.AndroidHttpToolsRepositoryFunction;
-import com.google.devtools.build.lib.bazel.rules.android.AndroidLocalToolsRepositoryFunction;
 import com.google.devtools.build.lib.bazel.rules.android.AndroidNdkRepositoryFunction;
 import com.google.devtools.build.lib.bazel.rules.android.AndroidNdkRepositoryRule;
-import com.google.devtools.build.lib.bazel.rules.android.AndroidRepositoryRules;
-import com.google.devtools.build.lib.bazel.rules.android.AndroidRepositoryRules.AndroidHttpToolsRepositoryRule;
 import com.google.devtools.build.lib.bazel.rules.android.AndroidSdkRepositoryFunction;
 import com.google.devtools.build.lib.bazel.rules.android.AndroidSdkRepositoryRule;
 import com.google.devtools.build.lib.bazel.rules.workspace.GitRepositoryRule;
 import com.google.devtools.build.lib.bazel.rules.workspace.HttpArchiveRule;
 import com.google.devtools.build.lib.bazel.rules.workspace.HttpFileRule;
 import com.google.devtools.build.lib.bazel.rules.workspace.HttpJarRule;
-import com.google.devtools.build.lib.bazel.rules.workspace.LocalRepositoryRule;
 import com.google.devtools.build.lib.bazel.rules.workspace.MavenJarRule;
 import com.google.devtools.build.lib.bazel.rules.workspace.NewGitRepositoryRule;
 import com.google.devtools.build.lib.bazel.rules.workspace.NewHttpArchiveRule;
-import com.google.devtools.build.lib.bazel.rules.workspace.NewLocalRepositoryRule;
 import com.google.devtools.build.lib.pkgcache.PackageCacheOptions;
+import com.google.devtools.build.lib.rules.repository.LocalRepositoryFunction;
+import com.google.devtools.build.lib.rules.repository.LocalRepositoryRule;
+import com.google.devtools.build.lib.rules.repository.NewLocalRepositoryFunction;
+import com.google.devtools.build.lib.rules.repository.NewLocalRepositoryRule;
+import com.google.devtools.build.lib.rules.repository.RepositoryDelegatorFunction;
+import com.google.devtools.build.lib.rules.repository.RepositoryFunction;
 import com.google.devtools.build.lib.runtime.BlazeCommand;
 import com.google.devtools.build.lib.runtime.BlazeModule;
 import com.google.devtools.build.lib.runtime.Command;
@@ -111,10 +107,6 @@ public class BazelRepositoryModule extends BlazeModule {
             .put(NewLocalRepositoryRule.NAME, new NewLocalRepositoryFunction())
             .put(AndroidSdkRepositoryRule.NAME, new AndroidSdkRepositoryFunction())
             .put(AndroidNdkRepositoryRule.NAME, new AndroidNdkRepositoryFunction())
-            .put(
-                AndroidRepositoryRules.AndroidLocalRepositoryRule.NAME,
-                new AndroidLocalToolsRepositoryFunction())
-            .put(AndroidHttpToolsRepositoryRule.NAME, new AndroidHttpToolsRepositoryFunction())
             .build();
   }
 
@@ -147,14 +139,13 @@ public class BazelRepositoryModule extends BlazeModule {
         }
 
         @Override
-        public SkyValue createNewValue(SkyKey key, TimestampGranularityMonitor tsgm) {
+        public SkyValue createNewValue(SkyKey key, @Nullable TimestampGranularityMonitor tsgm) {
           throw new UnsupportedOperationException();
         }
 
         @Override
-        @Nullable
         public DirtyResult check(
-            SkyKey skyKey, SkyValue skyValue, TimestampGranularityMonitor tsgm) {
+            SkyKey skyKey, SkyValue skyValue, @Nullable TimestampGranularityMonitor tsgm) {
           HttpDownloadValue httpDownloadValue = (HttpDownloadValue) skyValue;
           Path path = httpDownloadValue.getPath();
           try {

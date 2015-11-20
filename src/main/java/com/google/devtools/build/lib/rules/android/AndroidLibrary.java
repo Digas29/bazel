@@ -32,6 +32,7 @@ import com.google.devtools.build.lib.rules.android.AndroidResourcesProvider.Reso
 import com.google.devtools.build.lib.rules.cpp.LinkerInput;
 import com.google.devtools.build.lib.rules.java.JavaCommon;
 import com.google.devtools.build.lib.rules.java.JavaNeverlinkInfoProvider;
+import com.google.devtools.build.lib.rules.java.JavaPluginInfoProvider;
 import com.google.devtools.build.lib.rules.java.JavaSemantics;
 import com.google.devtools.build.lib.rules.java.JavaSkylarkApiProvider;
 import com.google.devtools.build.lib.rules.java.JavaSourceInfoProvider;
@@ -68,7 +69,7 @@ public abstract class AndroidLibrary implements RuleConfiguredTargetFactory {
     NestedSet<Artifact> transitiveProguardConfigs =
         new ProguardLibrary(ruleContext).collectProguardSpecs();
     JavaCommon javaCommon = new JavaCommon(ruleContext, javaSemantics);
-    AndroidCommon androidCommon = new AndroidCommon(ruleContext, javaCommon);
+    AndroidCommon androidCommon = new AndroidCommon(javaCommon);
 
     boolean definesLocalResources =
       LocalResourceContainer.definesAndroidResources(ruleContext.attributes());
@@ -83,7 +84,7 @@ public abstract class AndroidLibrary implements RuleConfiguredTargetFactory {
         resourceApk = applicationManifest.packWithDataAndResources(
             ruleContext.getImplicitOutputArtifact(AndroidRuleClasses.ANDROID_RESOURCES_APK),
             ruleContext,
-            ResourceDependencies.fromRuleDeps(ruleContext),
+            ResourceDependencies.fromRuleDeps(ruleContext, JavaCommon.isNeverLink(ruleContext)),
             ruleContext.getImplicitOutputArtifact(AndroidRuleClasses.ANDROID_R_TXT),
             ruleContext.getImplicitOutputArtifact(AndroidRuleClasses.ANDROID_SYMBOLS_TXT),
             ImmutableList.<String>of(), /* configurationFilters */
@@ -102,7 +103,7 @@ public abstract class AndroidLibrary implements RuleConfiguredTargetFactory {
       }
     } else {
       resourceApk = ResourceApk.fromTransitiveResources(
-          ResourceDependencies.fromRuleResourceAndDeps(ruleContext));
+          ResourceDependencies.fromRuleResourceAndDeps(ruleContext, false /* neverlink */));
     }
 
     JavaTargetAttributes javaTargetAttributes = androidCommon.init(
@@ -115,8 +116,8 @@ public abstract class AndroidLibrary implements RuleConfiguredTargetFactory {
       return null;
     }
 
-    Artifact classesJar = mergeJarsFromSrcs(ruleContext,
-        ruleContext.getImplicitOutputArtifact(AndroidRuleClasses.ANDROID_LIBRARY_CLASS_JAR));
+    Artifact classesJar =
+        ruleContext.getImplicitOutputArtifact(AndroidRuleClasses.ANDROID_LIBRARY_CLASS_JAR);
     Artifact aarOut = ruleContext.getImplicitOutputArtifact(
         AndroidRuleClasses.ANDROID_LIBRARY_AAR);
 
@@ -188,29 +189,12 @@ public abstract class AndroidLibrary implements RuleConfiguredTargetFactory {
       .add(JavaSourceJarsProvider.class, androidCommon.getJavaSourceJarsProvider())
       .add(AndroidCcLinkParamsProvider.class,
           new AndroidCcLinkParamsProvider(androidCommon.getCcLinkParamsStore()))
+      .add(JavaPluginInfoProvider.class, javaCommon.getTransitivePlugins())
       .add(ProguardSpecProvider.class, new ProguardSpecProvider(transitiveProguardConfigs))
       .addOutputGroup(OutputGroupProvider.HIDDEN_TOP_LEVEL, transitiveProguardConfigs)
       .add(AndroidLibraryAarProvider.class, new AndroidLibraryAarProvider(
                   aar, transitiveAars.build()))
       .build();
-  }
-
-  private static Artifact mergeJarsFromSrcs(RuleContext ruleContext, Artifact inputJar)
-      throws InterruptedException {
-    ImmutableList<Artifact> jarSources =
-        ruleContext
-        .getPrerequisiteArtifacts("srcs", Mode.TARGET).filter(JavaSemantics.JAR).list();
-    if (jarSources.isEmpty()) {
-      return inputJar;
-    }
-    Artifact mergedJar = ruleContext.getImplicitOutputArtifact(
-        AndroidRuleClasses.ANDROID_LIBRARY_AAR_CLASSES_JAR);
-    new SingleJarBuilder(ruleContext)
-        .setOutputJar(mergedJar)
-        .addInputJar(inputJar)
-        .addInputJars(jarSources)
-        .build();
-    return mergedJar;
   }
 
   private void checkResourceInlining(RuleContext ruleContext) {

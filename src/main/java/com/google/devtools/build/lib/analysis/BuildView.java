@@ -42,7 +42,6 @@ import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollection;
 import com.google.devtools.build.lib.analysis.config.ConfigMatchingProvider;
 import com.google.devtools.build.lib.cmdline.Label;
-import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
@@ -51,7 +50,6 @@ import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadCompatible;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.StoredEventHandler;
-import com.google.devtools.build.lib.packages.AspectParameters;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.NativeAspectClass;
@@ -62,13 +60,13 @@ import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.packages.TargetUtils;
 import com.google.devtools.build.lib.pkgcache.LoadedPackageProvider;
-import com.google.devtools.build.lib.pkgcache.LoadingPhaseRunner.LoadingResult;
+import com.google.devtools.build.lib.pkgcache.LoadingResult;
 import com.google.devtools.build.lib.rules.test.CoverageReportActionFactory;
 import com.google.devtools.build.lib.rules.test.CoverageReportActionFactory.CoverageReportActionsWrapper;
 import com.google.devtools.build.lib.rules.test.InstrumentedFilesProvider;
 import com.google.devtools.build.lib.skyframe.ActionLookupValue;
 import com.google.devtools.build.lib.skyframe.AspectValue;
-import com.google.devtools.build.lib.skyframe.AspectValue.AspectKey;
+import com.google.devtools.build.lib.skyframe.AspectValue.AspectValueKey;
 import com.google.devtools.build.lib.skyframe.ConfiguredTargetKey;
 import com.google.devtools.build.lib.skyframe.CoverageReportValue;
 import com.google.devtools.build.lib.skyframe.SkyframeAnalysisResult;
@@ -451,21 +449,16 @@ public class BuildView {
           }
         });
 
-    List<AspectKey> aspectKeys = new ArrayList<>();
+    List<AspectValueKey> aspectKeys = new ArrayList<>();
     for (String aspect : aspects) {
 
       // Syntax: label%aspect
       int delimiterPosition = aspect.indexOf('%');
       if (delimiterPosition >= 0) {
-        PackageIdentifier bzlFile;
-        try {
-          bzlFile =
-              PackageIdentifier.create(
-                  PackageIdentifier.DEFAULT_REPOSITORY,
-                  new PathFragment(aspect.substring(0, delimiterPosition)));
-        } catch (LabelSyntaxException e) {
-          throw new ViewCreationFailedException("Error", e);
-        }
+        // TODO(jfield): For consistency with Skylark loads, the aspect should be specified
+        // as an absolute path. Also, we probably need to do at least basic validation of
+        // path well-formedness here.
+        PathFragment bzlFile = new PathFragment("/" + aspect.substring(0, delimiterPosition));
 
         String skylarkFunctionName = aspect.substring(delimiterPosition + 1);
         for (ConfiguredTargetKey targetSpec : targetSpecs) {
@@ -478,8 +471,8 @@ public class BuildView {
         }
       } else {
         @SuppressWarnings("unchecked")
-        final Class<? extends ConfiguredAspectFactory> aspectFactoryClass =
-            (Class<? extends ConfiguredAspectFactory>)
+        final Class<? extends ConfiguredNativeAspectFactory> aspectFactoryClass =
+            (Class<? extends ConfiguredNativeAspectFactory>)
                 ruleClassProvider.getAspectFactoryMap().get(aspect);
         if (aspectFactoryClass != null) {
           for (ConfiguredTargetKey targetSpec : targetSpecs) {
@@ -553,8 +546,10 @@ public class BuildView {
     Collection<ConfiguredTarget> allTargetsToTest = null;
     if (testsToRun != null) {
       // Determine the subset of configured targets that are meant to be run as tests.
-      allTargetsToTest = Lists.newArrayList(
-          filterTestsByTargets(configuredTargets, Sets.newHashSet(testsToRun)));
+      // Do not remove <ConfiguredTarget>: workaround for Java 7 type inference.
+      allTargetsToTest =
+          Lists.<ConfiguredTarget>newArrayList(
+              filterTestsByTargets(configuredTargets, Sets.newHashSet(testsToRun)));
     }
 
     Set<Artifact> artifactsToBuild = new HashSet<>();
@@ -892,9 +887,12 @@ public class BuildView {
     TargetAndConfiguration ctNode = new TargetAndConfiguration(target);
     ListMultimap<Attribute, Dependency> depNodeNames;
     try {
-      depNodeNames = resolver.dependentNodeMap(ctNode, configurations.getHostConfiguration(),
-          /*aspect=*/null, AspectParameters.EMPTY,
-          getConfigurableAttributeKeysForTesting(eventHandler, ctNode));
+      depNodeNames =
+          resolver.dependentNodeMap(
+              ctNode,
+              configurations.getHostConfiguration(),
+              /*aspect=*/ null,
+              getConfigurableAttributeKeysForTesting(eventHandler, ctNode));
     } catch (EvalException e) {
       throw new IllegalStateException(e);
     }
@@ -953,6 +951,7 @@ public class BuildView {
                 Order.STABLE_ORDER, PackageSpecification.EVERYTHING))
             .setPrerequisites(getPrerequisiteMapForTesting(eventHandler, target, configurations))
             .setConfigConditions(ImmutableSet.<ConfigMatchingProvider>of())
+            .setUniversalFragment(ruleClassProvider.getUniversalFragment())
             .build();
   }
 

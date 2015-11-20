@@ -109,7 +109,7 @@ linux)
 freebsd)
   LDFLAGS="-lprocstat -lz -lrt $LDFLAGS"
   JNILIB="libunix.so"
-  MD5SUM="md5sum"
+  MD5SUM="md5"
   # JAVA_HOME must point to a Java installation.
   JAVA_HOME="${JAVA_HOME:-/usr/local/openjdk8}"
   # Note: the linux protoc binary works on freebsd using linux emulation.
@@ -267,7 +267,7 @@ function cc_link() {
     local OBJ=$(basename "${FILE}").o
     FILES+=("${OUTPUT_DIR}/${OBJDIR}/${OBJ}")
   done
-  run_silent "${CXX}" -o ${OUTPUT} "${FILES[@]}" -lstdc++ ${LDFLAGS}
+  run_silent "${CXX}" -o ${OUTPUT} "${FILES[@]}" ${LDFLAGS}
 }
 
 function cc_build() {
@@ -296,7 +296,7 @@ if [ -z "${BAZEL_SKIP_JAVA_COMPILATION}" ]; then
   done
 
   create_deploy_jar "libblaze" "com.google.devtools.build.lib.bazel.BazelMain" \
-      ${OUTPUT_DIR} third_party/javascript
+      ${OUTPUT_DIR}
 fi
 
 cc_build "client" "objs" "${OUTPUT_DIR}/client" ${BLAZE_CC_FILES[@]}
@@ -320,21 +320,21 @@ if [ ! -z "$JNILIB" ] ; then
   done
 
   log "Linking ${JNILIB}..."
-  run_silent "${CXX}" -o ${OUTPUT_DIR}/${JNILIB} $JNI_LD_ARGS -shared ${OUTPUT_DIR}/native/*.o -l stdc++
+  run_silent "${CXX}" -o ${OUTPUT_DIR}/${JNILIB} $JNI_LD_ARGS -shared ${OUTPUT_DIR}/native/*.o -lstdc++
 fi
 
 log "Compiling build-runfiles..."
 # Clang on Linux requires libstdc++
-run_silent "${CXX}" -o ${OUTPUT_DIR}/build-runfiles -std=c++0x src/main/tools/build-runfiles.cc -l stdc++
+run_silent "${CXX}" -o ${OUTPUT_DIR}/build-runfiles -std=c++0x src/main/tools/build-runfiles.cc -lstdc++ ${LDFLAGS}
 
 log "Compiling process-wrapper..."
-run_silent "${CC}" -o ${OUTPUT_DIR}/process-wrapper -std=c99 src/main/tools/process-wrapper.c src/main/tools/process-tools.c -lm
+run_silent "${CC}" -o ${OUTPUT_DIR}/process-wrapper -std=c99 src/main/tools/process-wrapper.c src/main/tools/process-tools.c -lm ${LDFLAGS}
 
 log "Compiling namespace-sandbox..."
 if [[ $PLATFORM == "linux" ]]; then
-  run_silent "${CC}" -o ${OUTPUT_DIR}/namespace-sandbox -std=c99 src/main/tools/namespace-sandbox.c src/main/tools/network-tools.c src/main/tools/process-tools.c -lm
+  run_silent "${CC}" -o ${OUTPUT_DIR}/namespace-sandbox -std=c99 src/main/tools/namespace-sandbox.c src/main/tools/network-tools.c src/main/tools/process-tools.c -lm ${LDFLAGS}
 else
-  run_silent "${CC}" -o ${OUTPUT_DIR}/namespace-sandbox -std=c99 src/main/tools/namespace-sandbox-dummy.c -lm
+  run_silent "${CC}" -o ${OUTPUT_DIR}/namespace-sandbox -std=c99 src/main/tools/namespace-sandbox-dummy.c -lm ${LDFLAGS}
 fi
 
 cp src/main/tools/build_interface_so ${OUTPUT_DIR}/build_interface_so

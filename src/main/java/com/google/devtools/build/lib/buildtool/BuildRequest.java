@@ -20,13 +20,14 @@ import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSortedSet;
+import com.google.common.collect.Sets;
 import com.google.devtools.build.lib.Constants;
 import com.google.devtools.build.lib.analysis.BuildView;
 import com.google.devtools.build.lib.analysis.OutputGroupProvider;
 import com.google.devtools.build.lib.analysis.TopLevelArtifactContext;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
 import com.google.devtools.build.lib.exec.ExecutionOptions;
-import com.google.devtools.build.lib.pkgcache.LoadingPhaseRunner;
+import com.google.devtools.build.lib.pkgcache.LoadingOptions;
 import com.google.devtools.build.lib.pkgcache.PackageCacheOptions;
 import com.google.devtools.build.lib.runtime.BlazeCommandEventHandler;
 import com.google.devtools.build.lib.util.OptionsUtils;
@@ -42,7 +43,6 @@ import com.google.devtools.common.options.OptionsParsingException;
 import com.google.devtools.common.options.OptionsProvider;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -207,7 +207,12 @@ public class BuildRequest implements OptionsClassProvider {
         allowMultiple = true,
         defaultValue = "",
         category = "undocumented",
-        help = "Specifies, which output groups of the top-level target to build.")
+        help = "Specifies which output groups of the top-level targets to build. "
+            + "If omitted, a default set of output groups are built."
+            + "When specified the default set is overridden."
+            + "However you may use --output_groups=+<output_group> "
+            + "or --output_groups=-<output_group> "
+            + "to instead modify the set of output groups.")
     public List<String> outputGroups;
 
     @Option(name = "show_result",
@@ -268,6 +273,14 @@ public class BuildRequest implements OptionsClassProvider {
                 + "this flag to false to see the effect on incremental build times.")
     public boolean checkOutputFiles;
 
+    @Option(name = "experimental_output_tree_tracking",
+            defaultValue = "false",
+            category = "undocumented",
+            help = "If set, communicate with objsfd to track when files in the output tree have "
+                + "been modified externally (not by Blaze). This should improve incremental build "
+                + "speed.")
+    public boolean finalizeActions;
+
     @Option(
       name = "aspects",
       converter = Converters.CommaSeparatedOptionListConverter.class,
@@ -313,7 +326,7 @@ public class BuildRequest implements OptionsClassProvider {
   private static final List<Class<? extends OptionsBase>> MANDATORY_OPTIONS = ImmutableList.of(
           BuildRequestOptions.class,
           PackageCacheOptions.class,
-          LoadingPhaseRunner.Options.class,
+          LoadingOptions.class,
           BuildView.Options.class,
           ExecutionOptions.class);
 
@@ -431,8 +444,8 @@ public class BuildRequest implements OptionsClassProvider {
   /**
    * Returns the set of options related to the loading phase.
    */
-  public LoadingPhaseRunner.Options getLoadingOptions() {
-    return getOptions(LoadingPhaseRunner.Options.class);
+  public LoadingOptions getLoadingOptions() {
+    return getOptions(LoadingOptions.class);
   }
 
   /**
@@ -516,10 +529,20 @@ public class BuildRequest implements OptionsClassProvider {
   }
 
   private ImmutableSortedSet<String> determineOutputGroups() {
-    Set<String> current = new HashSet<>(OutputGroupProvider.DEFAULT_GROUPS);
+    Set<String> current = Sets.newHashSet();
+
+    boolean overridesDefaultOutputGroups = false;
+    for (String outputGroup : getBuildOptions().outputGroups) {
+      overridesDefaultOutputGroups |= !(outputGroup.startsWith("+") || outputGroup.startsWith("-"));
+    }
+    if (!overridesDefaultOutputGroups) {
+      current.addAll(OutputGroupProvider.DEFAULT_GROUPS);
+    }
 
     for (String outputGroup : getBuildOptions().outputGroups) {
-      if (outputGroup.startsWith("-")) {
+      if (outputGroup.startsWith("+")) {
+        current.add(outputGroup.substring(1));
+      } else if (outputGroup.startsWith("-")) {
         current.remove(outputGroup.substring(1));
       } else {
         current.add(outputGroup);

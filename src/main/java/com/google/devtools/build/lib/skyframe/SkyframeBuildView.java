@@ -32,18 +32,14 @@ import com.google.devtools.build.lib.actions.ArtifactOwner;
 import com.google.devtools.build.lib.actions.ArtifactPrefixConflictException;
 import com.google.devtools.build.lib.actions.MutableActionGraph;
 import com.google.devtools.build.lib.actions.MutableActionGraph.ActionConflictException;
-import com.google.devtools.build.lib.analysis.AnalysisEnvironment;
 import com.google.devtools.build.lib.analysis.AnalysisFailureEvent;
-import com.google.devtools.build.lib.analysis.Aspect;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.BuildView;
 import com.google.devtools.build.lib.analysis.CachingAnalysisEnvironment;
-import com.google.devtools.build.lib.analysis.ConfiguredAspectFactory;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.ConfiguredTargetFactory;
 import com.google.devtools.build.lib.analysis.LabelAndConfiguration;
-import com.google.devtools.build.lib.analysis.RuleConfiguredTarget;
 import com.google.devtools.build.lib.analysis.ViewCreationFailedException;
 import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoFactory;
 import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoFactory.BuildInfoKey;
@@ -55,7 +51,6 @@ import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
-import com.google.devtools.build.lib.packages.AspectParameters;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.Package;
 import com.google.devtools.build.lib.packages.RuleClassProvider;
@@ -63,7 +58,7 @@ import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.pkgcache.LoadingPhaseRunner;
 import com.google.devtools.build.lib.skyframe.ActionLookupValue.ActionLookupKey;
 import com.google.devtools.build.lib.skyframe.AspectFunction.AspectCreationException;
-import com.google.devtools.build.lib.skyframe.AspectValue.AspectKey;
+import com.google.devtools.build.lib.skyframe.AspectValue.AspectValueKey;
 import com.google.devtools.build.lib.skyframe.BuildInfoCollectionValue.BuildInfoKeyAndConfig;
 import com.google.devtools.build.lib.skyframe.ConfiguredTargetFunction.ConfiguredValueCreationException;
 import com.google.devtools.build.lib.skyframe.SkyframeActionExecutor.ConflictException;
@@ -146,6 +141,10 @@ public final class SkyframeBuildView {
 
   public Set<SkyKey> getEvaluatedTargetKeys() {
     return ImmutableSet.copyOf(evaluatedConfiguredTargets);
+  }
+
+  ConfiguredTargetFactory getConfiguredTargetFactory() {
+    return factory;
   }
 
   /**
@@ -238,7 +237,7 @@ public final class SkyframeBuildView {
   public SkyframeAnalysisResult configureTargets(
       EventHandler eventHandler,
       List<ConfiguredTargetKey> values,
-      List<AspectKey> aspectKeys,
+      List<AspectValueKey> aspectKeys,
       EventBus eventBus,
       boolean keepGoing)
       throws InterruptedException, ViewCreationFailedException {
@@ -253,7 +252,7 @@ public final class SkyframeBuildView {
 
     Collection<AspectValue> goodAspects = Lists.newArrayListWithCapacity(values.size());
     NestedSetBuilder<Package> packages = NestedSetBuilder.stableOrder();
-    for (AspectKey aspectKey : aspectKeys) {
+    for (AspectValueKey aspectKey : aspectKeys) {
       AspectValue value = (AspectValue) result.get(AspectValue.key(aspectKey));
       if (value == null) {
         // Skip aspects that couldn't be applied to targets.
@@ -320,8 +319,8 @@ public final class SkyframeBuildView {
             "Analysis of target '"
                 + ConfiguredTargetValue.extractLabel(topLevel)
                 + "' failed; build aborted";
-      } else if (topLevel.argument() instanceof AspectKey) {
-        AspectKey aspectKey = (AspectKey) topLevel.argument();
+      } else if (topLevel.argument() instanceof AspectValueKey) {
+        AspectValueKey aspectKey = (AspectValueKey) topLevel.argument();
         errorMsg = "Analysis of aspect '" + aspectKey.getDescription() + "' failed; build aborted";
       } else {
         assert false;
@@ -510,6 +509,20 @@ public final class SkyframeBuildView {
     if (config == null || !config.useDynamicConfigurations()) {
       return topLevelHostConfiguration;
     }
+    // TODO(bazel-team): have the fragment classes be those required by the consuming target's
+    // transitive closure. This isn't the same as the input configuration's fragment classes -
+    // the latter may be a proper subset of the former.
+    //
+    // ConfigurationFactory.getConfiguration provides the reason why: if a declared required
+    // fragment is evaluated and returns null, it never gets added to the configuration. So if we
+    // use the configuration's fragments as the source of truth, that excludes required fragments
+    // that never made it in.
+    //
+    // If we're just trimming an existing configuration, this is no big deal (if the original
+    // configuration doesn't need the fragment, the trimmed one doesn't either). But this method
+    // trims a host configuration to the same scope as a target configuration. Since their options
+    // are different, the host instance may actually be able to produce the fragment. So it's
+    // wrong and potentially dangerous to unilaterally exclude it.
     Set<Class<? extends BuildConfiguration.Fragment>> fragmentClasses = config.fragmentClasses();
     BuildConfiguration hostConfig = hostConfigurationCache.get(fragmentClasses);
     if (hostConfig != null) {
@@ -519,20 +532,6 @@ public final class SkyframeBuildView {
         topLevelHostConfiguration.clone(fragmentClasses, ruleClassProvider);
     hostConfigurationCache.put(fragmentClasses, trimmedConfig);
     return trimmedConfig;
-  }
-
-  @Nullable
-  public Aspect createAspect(
-      AnalysisEnvironment env,
-      RuleConfiguredTarget associatedTarget,
-      ConfiguredAspectFactory aspectFactory,
-      ListMultimap<Attribute, ConfiguredTarget> prerequisiteMap,
-      Set<ConfigMatchingProvider> configConditions,
-      AspectParameters aspectParameters)
-      throws InterruptedException {
-    return factory.createAspect(env, associatedTarget, aspectFactory, aspectParameters,
-        prerequisiteMap, configConditions,
-        getHostConfiguration(associatedTarget.getConfiguration()));
   }
 
   @Nullable

@@ -24,8 +24,8 @@ import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.Constants;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ParameterFile;
-import com.google.devtools.build.lib.analysis.Aspect;
-import com.google.devtools.build.lib.analysis.ConfiguredAspectFactory;
+import com.google.devtools.build.lib.analysis.ConfiguredAspect;
+import com.google.devtools.build.lib.analysis.ConfiguredNativeAspectFactory;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
@@ -54,7 +54,7 @@ import java.util.List;
 /**
  * J2ObjC transpilation aspect for Java rules.
  */
-public class J2ObjcAspect implements ConfiguredAspectFactory {
+public class J2ObjcAspect implements ConfiguredNativeAspectFactory {
   public static final String NAME = "J2ObjcAspect";
   /**
    * Adds the attribute aspect args to the given AspectDefinition.Builder.
@@ -66,7 +66,7 @@ public class J2ObjcAspect implements ConfiguredAspectFactory {
   }
 
   @Override
-  public AspectDefinition getDefinition() {
+  public AspectDefinition getDefinition(AspectParameters aspectParameters) {
     return addAttributeAspects(new AspectDefinition.Builder("J2ObjCAspect"))
         .requireProvider(JavaSourceInfoProvider.class)
         .requireProvider(JavaCompilationArgsProvider.class)
@@ -90,9 +90,9 @@ public class J2ObjcAspect implements ConfiguredAspectFactory {
   }
 
   @Override
-  public Aspect create(ConfiguredTarget base, RuleContext ruleContext,
-      AspectParameters parameters) {
-    Aspect.Builder builder = new Aspect.Builder(NAME);
+  public ConfiguredAspect create(
+      ConfiguredTarget base, RuleContext ruleContext, AspectParameters parameters) {
+    ConfiguredAspect.Builder builder = new ConfiguredAspect.Builder(NAME, ruleContext);
 
     JavaCompilationArgsProvider compilationArgsProvider =
         base.getProvider(JavaCompilationArgsProvider.class);

@@ -15,7 +15,6 @@
 package com.google.devtools.build.lib.rules.objc;
 
 import static com.google.devtools.build.lib.packages.ImplicitOutputsFunction.fromTemplates;
-import static com.google.devtools.build.lib.rules.objc.J2ObjcSource.SourceType;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.DEFINE;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.FORCE_LOAD_LIBRARY;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.FRAMEWORK_DIR;
@@ -42,7 +41,6 @@ import static com.google.devtools.build.lib.rules.objc.ObjcRuleClasses.NON_ARC_S
 import static com.google.devtools.build.lib.rules.objc.ObjcRuleClasses.SRCS_TYPE;
 import static com.google.devtools.build.lib.rules.objc.ObjcRuleClasses.STRIP;
 import static com.google.devtools.build.lib.rules.objc.ObjcRuleClasses.SWIFT;
-import static com.google.devtools.build.lib.rules.objc.ObjcRuleClasses.XCRUN;
 import static com.google.devtools.build.lib.rules.objc.ObjcRuleClasses.intermediateArtifacts;
 import static java.nio.charset.StandardCharsets.ISO_8859_1;
 
@@ -60,6 +58,7 @@ import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ParameterFile;
 import com.google.devtools.build.lib.analysis.AnalysisEnvironment;
+import com.google.devtools.build.lib.analysis.FilesToRunProvider;
 import com.google.devtools.build.lib.analysis.PrerequisiteArtifacts;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
@@ -74,10 +73,14 @@ import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.ImplicitOutputsFunction.SafeImplicitOutputsFunction;
 import com.google.devtools.build.lib.packages.TargetUtils;
+import com.google.devtools.build.lib.rules.apple.AppleConfiguration;
+import com.google.devtools.build.lib.rules.apple.AppleToolchain;
+import com.google.devtools.build.lib.rules.apple.Platform;
 import com.google.devtools.build.lib.rules.cpp.CppModuleMap;
 import com.google.devtools.build.lib.rules.cpp.CppModuleMapAction;
 import com.google.devtools.build.lib.rules.cpp.LinkerInputs;
 import com.google.devtools.build.lib.rules.java.J2ObjcConfiguration;
+import com.google.devtools.build.lib.rules.objc.J2ObjcSource.SourceType;
 import com.google.devtools.build.lib.rules.objc.ObjcCommon.CompilationAttributes;
 import com.google.devtools.build.lib.rules.objc.XcodeProvider.Builder;
 import com.google.devtools.build.lib.rules.test.InstrumentedFilesCollector;
@@ -115,6 +118,13 @@ public final class CompilationSupport {
   @VisibleForTesting
   static final ImmutableList<String> CLANG_COVERAGE_FLAGS =
       ImmutableList.of("-fprofile-arcs", "-ftest-coverage");
+
+  /**
+   * Returns the location of the xcrunwrapper tool.
+   */
+  public static final FilesToRunProvider xcrunwrapper(RuleContext ruleContext) {
+   return ruleContext.getExecutablePrerequisite("$xcrunwrapper", Mode.HOST);
+  }
 
   /**
    * Files which can be instrumented along with the attributes in which they may occur and the
@@ -175,6 +185,10 @@ public final class CompilationSupport {
   static final String FILE_IN_SRCS_AND_NON_ARC_SRCS_ERROR_FORMAT =
       "File '%s' is present in both srcs and non_arc_srcs which is forbidden.";
 
+  static final ImmutableList<String> DEFAULT_COMPILER_FLAGS = ImmutableList.of("-DOS_IOS");
+
+  static final ImmutableList<String> DEFAULT_LINKER_FLAGS = ImmutableList.of("-ObjC");
+  
   /**
    * Returns information about the given rule's compilation artifacts.
    */
@@ -277,7 +291,7 @@ public final class CompilationSupport {
     }
 
     if (compilationArtifacts.hasSwiftSources()) {
-      registerSwiftModuleMergeAction(intermediateArtifacts, compilationArtifacts);
+      registerSwiftModuleMergeAction(intermediateArtifacts, compilationArtifacts, objcProvider);
     }
 
     for (Artifact archive : compilationArtifacts.getArchive().asSet()) {
@@ -287,6 +301,26 @@ public final class CompilationSupport {
     if (isFullyLinkEnabled) {
       registerFullyLinkAction(objcProvider);
     }
+  }
+
+  /**
+   * Adds a source file to a command line, honoring the useAbsolutePathForActions flag.
+   */
+  private CustomCommandLine.Builder addSource(CustomCommandLine.Builder commandLine,
+      ObjcConfiguration objcConfiguration, Artifact sourceFile) {
+    PathFragment sourceExecPathFragment = sourceFile.getExecPath();
+    String sourcePath = sourceExecPathFragment.getPathString();
+    if (!sourceExecPathFragment.isAbsolute() && objcConfiguration.getUseAbsolutePathsForActions()) {
+      sourcePath = objcConfiguration.getXcodeWorkspaceRoot() + "/" + sourcePath;
+    }
+    commandLine.add(sourcePath);
+    return commandLine;
+  }
+
+  private CustomCommandLine.Builder addSource(String argName, CustomCommandLine.Builder commandLine,
+      ObjcConfiguration objcConfiguration, Artifact sourceFile) {
+    commandLine.add(argName);
+    return addSource(commandLine, objcConfiguration, sourceFile);
   }
 
   private void registerCompileAction(
@@ -299,6 +333,7 @@ public final class CompilationSupport {
       Iterable<String> otherFlags,
       boolean isCodeCoverageEnabled) {
     ObjcConfiguration objcConfiguration = ObjcRuleClasses.objcConfiguration(ruleContext);
+    AppleConfiguration appleConfiguration = ruleContext.getFragment(AppleConfiguration.class);
     ImmutableList.Builder<String> coverageFlags = new ImmutableList.Builder<>();
     ImmutableList.Builder<Artifact> gcnoFiles = new ImmutableList.Builder<>();
     ImmutableList.Builder<Artifact> additionalInputs = new ImmutableList.Builder<>();
@@ -327,8 +362,8 @@ public final class CompilationSupport {
 
     Artifact dotdFile = intermediateArtifacts.dotdFile(sourceFile);
     commandLine
-        .add(IosSdkCommands.compileFlagsForClang(objcConfiguration))
-        .add(IosSdkCommands.commonLinkAndCompileFlagsForClang(objcProvider, objcConfiguration))
+        .add(compileFlagsForClang(appleConfiguration))
+        .add(commonLinkAndCompileFlagsForClang(objcProvider, objcConfiguration, appleConfiguration))
         .add(objcConfiguration.getCoptsForCompilationMode())
         .addBeforeEachPath(
             "-iquote", ObjcCommon.userHeaderSearchPaths(ruleContext.getConfiguration()))
@@ -340,11 +375,17 @@ public final class CompilationSupport {
         .add(coverageFlags.build())
         .add(objcConfiguration.getCopts())
         .add(attributes.copts())
-        .add(attributes.optionsCopts())
-        .addExecPath("-c", sourceFile)
-        .addExecPath("-o", objFile)
-        .add("-MD")
-        .addExecPath("-MF", dotdFile);
+        .add(attributes.optionsCopts());
+    PathFragment sourceExecPathFragment = sourceFile.getExecPath();
+    String sourcePath = sourceExecPathFragment.getPathString();
+    if (!sourceExecPathFragment.isAbsolute() && objcConfiguration.getUseAbsolutePathsForActions()) {
+      sourcePath = objcConfiguration.getXcodeWorkspaceRoot() + "/" + sourcePath;
+    }
+    commandLine
+      .add("-c").add(sourcePath)
+      .addExecPath("-o", objFile)
+      .add("-MD")
+      .addExecPath("-MF", dotdFile);
 
     if (moduleMap.isPresent()) {
       // -fmodule-map-file only loads the module in Xcode 7, so we add the module maps's directory
@@ -371,7 +412,7 @@ public final class CompilationSupport {
     // TODO(bazel-team): Remote private headers from inputs once they're added to the provider.
     ruleContext.registerAction(ObjcRuleClasses.spawnOnDarwinActionBuilder(ruleContext)
         .setMnemonic("ObjcCompile")
-        .setExecutable(XCRUN)
+        .setExecutable(xcrunwrapper(ruleContext))
         .setCommandLine(commandLine.build())
         .addInput(sourceFile)
         .addInputs(additionalInputs.build())
@@ -391,6 +432,8 @@ public final class CompilationSupport {
    *
    * @param sourceFile the artifact to compile
    * @param objFile the resulting object artifact
+   * @param intermediateArtifacts intermediary artifacts
+   * @param objcProvider ObjcProvider instance for this invocation
    */
   private void registerSwiftCompileAction(
       Artifact sourceFile,
@@ -398,6 +441,7 @@ public final class CompilationSupport {
       IntermediateArtifacts intermediateArtifacts,
       ObjcProvider objcProvider) {
     ObjcConfiguration objcConfiguration = ObjcRuleClasses.objcConfiguration(ruleContext);
+    AppleConfiguration appleConfiguration = ruleContext.getFragment(AppleConfiguration.class);
 
     // Compiling a single swift file requires knowledge of all of the other
     // swift files in the same module. The primary file ({@code sourceFile}) is
@@ -416,8 +460,8 @@ public final class CompilationSupport {
         .add(SWIFT)
         .add("-frontend")
         .add("-emit-object")
-        .add("-target").add(IosSdkCommands.swiftTarget(objcConfiguration))
-        .add("-sdk").add(IosSdkCommands.sdkDir(objcConfiguration))
+        .add("-target").add(swiftTarget(appleConfiguration))
+        .add("-sdk").add(AppleToolchain.sdkDir())
         .add("-enable-objc-interop");
 
     if (objcConfiguration.generateDebugSymbols()) {
@@ -427,12 +471,22 @@ public final class CompilationSupport {
     commandLine
       .add("-Onone")
       .add("-module-name").add(getModuleName())
-      .add("-parse-as-library")
-      .addExecPath("-primary-file", sourceFile)
+      .add("-parse-as-library");
+    addSource("-primary-file", commandLine, objcConfiguration, sourceFile)
       .addExecPaths(otherSwiftSources)
       .addExecPath("-o", objFile)
-      .addExecPath("-emit-module-path", intermediateArtifacts.swiftModuleFile(sourceFile));
+      .addExecPath("-emit-module-path", intermediateArtifacts.swiftModuleFile(sourceFile))
+      // The swift compiler will invoke clang itself when compiling module maps. This invocation
+      // does not include the current working directory, causing cwd-relative imports to fail.
+      // Including the current working directory to the header search paths ensures that these
+      // relative imports will work.
+      .add("-Xcc").add("-I.");
 
+    // Using addExecPathBefore here adds unnecessary quotes around '-Xcc -I', which trips the
+    // compiler. Using two add() calls generates a correctly formed command line.
+    for (PathFragment directory : objcProvider.get(INCLUDE).toList()) {
+      commandLine.add("-Xcc").add(String.format("-I%s", directory.toString()));
+    }
 
     ImmutableList.Builder<Artifact> inputHeaders = ImmutableList.<Artifact>builder()
         .addAll(attributes.hdrs())
@@ -450,12 +504,13 @@ public final class CompilationSupport {
     if (objcConfiguration.moduleMapsEnabled()) {
       PathFragment moduleMapPath = intermediateArtifacts.moduleMap().getArtifact().getExecPath();
       commandLine.add("-I").add(moduleMapPath.getParentDirectory().toString());
+      commandLine.add("-import-underlying-module");
     }
 
     ruleContext.registerAction(
         ObjcRuleClasses.spawnOnDarwinActionBuilder(ruleContext)
             .setMnemonic("SwiftCompile")
-            .setExecutable(XCRUN)
+            .setExecutable(xcrunwrapper(ruleContext))
             .setCommandLine(commandLine.build())
             .addInput(sourceFile)
             .addInputs(otherSwiftSources)
@@ -473,8 +528,10 @@ public final class CompilationSupport {
    */
   private void registerSwiftModuleMergeAction(
       IntermediateArtifacts intermediateArtifacts,
-      CompilationArtifacts compilationArtifacts) {
+      CompilationArtifacts compilationArtifacts,
+      ObjcProvider objcProvider) {
     ObjcConfiguration objcConfiguration = ObjcRuleClasses.objcConfiguration(ruleContext);
+    AppleConfiguration appleConfiguration = ruleContext.getFragment(AppleConfiguration.class);
 
     ImmutableList.Builder<Artifact> moduleFiles = new ImmutableList.Builder<>();
     for (Artifact src : compilationArtifacts.getSrcs()) {
@@ -487,23 +544,47 @@ public final class CompilationSupport {
         .add(SWIFT)
         .add("-frontend")
         .add("-emit-module")
-        .add("-sdk").add(IosSdkCommands.sdkDir(objcConfiguration))
-        .add("-target").add(IosSdkCommands.swiftTarget(objcConfiguration));
+        .add("-sdk").add(AppleToolchain.sdkDir())
+        .add("-target").add(swiftTarget(appleConfiguration));
+
     if (objcConfiguration.generateDebugSymbols()) {
       commandLine.add("-g");
     }
 
-    commandLine.add("-module-name").add(getModuleName())
+    commandLine
+        .add("-module-name").add(getModuleName())
         .add("-parse-as-library")
         .addExecPaths(moduleFiles.build())
         .addExecPath("-o", intermediateArtifacts.swiftModule())
-        .addExecPath("-emit-objc-header-path", intermediateArtifacts.swiftHeader());
+        .addExecPath("-emit-objc-header-path", intermediateArtifacts.swiftHeader())
+        // The swift compiler will invoke clang itself when compiling module maps. This invocation
+        // does not include the current working directory, causing cwd-relative imports to fail.
+        // Including the current working directory to the header search paths ensures that these
+        // relative imports will work.
+        .add("-Xcc").add("-I.");
+
+
+    // Using addExecPathBefore here adds unnecessary quotes around '-Xcc -I', which trips the
+    // compiler. Using two add() calls generates a correctly formed command line.
+    for (PathFragment directory : objcProvider.get(INCLUDE).toList()) {
+      commandLine.add("-Xcc").add(String.format("-I%s", directory.toString()));
+    }
+
+    // Import the Objective-C module map.
+    // TODO(bazel-team): Find a way to import the module map directly, instead of the parent
+    // directory?
+    if (objcConfiguration.moduleMapsEnabled()) {
+      PathFragment moduleMapPath = intermediateArtifacts.moduleMap().getArtifact().getExecPath();
+      commandLine.add("-I").add(moduleMapPath.getParentDirectory().toString());
+    }
 
     ruleContext.registerAction(ObjcRuleClasses.spawnOnDarwinActionBuilder(ruleContext)
         .setMnemonic("SwiftModuleMerge")
-        .setExecutable(XCRUN)
+        .setExecutable(xcrunwrapper(ruleContext))
         .setCommandLine(commandLine.build())
         .addInputs(moduleFiles.build())
+        .addTransitiveInputs(objcProvider.get(HEADER))
+        .addTransitiveInputs(objcProvider.get(MODULE_MAP))
         .addOutput(intermediateArtifacts.swiftModule())
         .addOutput(intermediateArtifacts.swiftHeader())
         .build(ruleContext));
@@ -512,7 +593,7 @@ public final class CompilationSupport {
   private void registerArchiveActions(IntermediateArtifacts intermediateArtifacts,
       ImmutableList.Builder<Artifact> objFiles, Artifact archive) {
     for (Action action : archiveActions(ruleContext, objFiles.build(), archive,
-        ObjcRuleClasses.objcConfiguration(ruleContext),
+        ruleContext.getFragment(AppleConfiguration.class),
         intermediateArtifacts.objList())) {
       ruleContext.registerAction(action);
     }
@@ -522,7 +603,7 @@ public final class CompilationSupport {
       ActionConstructionContext context,
       Iterable<Artifact> objFiles,
       Artifact archive,
-      ObjcConfiguration objcConfiguration,
+      AppleConfiguration appleConfiguration,
       Artifact objList) {
 
     ImmutableList.Builder<Action> actions = new ImmutableList.Builder<>();
@@ -535,13 +616,13 @@ public final class CompilationSupport {
 
     actions.add(ObjcRuleClasses.spawnOnDarwinActionBuilder(ruleContext)
         .setMnemonic("ObjcLink")
-        .setExecutable(XCRUN)
+        .setExecutable(xcrunwrapper(ruleContext))
         .setCommandLine(new CustomCommandLine.Builder()
             .add(LIBTOOL)
             .add("-static")
             .add("-filelist").add(objList.getExecPathString())
-            .add("-arch_only").add(objcConfiguration.getIosCpu())
-            .add("-syslibroot").add(IosSdkCommands.sdkDir(objcConfiguration))
+            .add("-arch_only").add(appleConfiguration.getIosCpu())
+            .add("-syslibroot").add(AppleToolchain.sdkDir())
             .add("-o").add(archive.getExecPathString())
             .build())
         .addInputs(objFiles)
@@ -553,18 +634,18 @@ public final class CompilationSupport {
   }
 
   private void registerFullyLinkAction(ObjcProvider objcProvider) throws InterruptedException {
-    ObjcConfiguration objcConfiguration = ObjcRuleClasses.objcConfiguration(ruleContext);
+    AppleConfiguration appleConfiguration = ruleContext.getFragment(AppleConfiguration.class);
     Artifact archive = ruleContext.getImplicitOutputArtifact(FULLY_LINKED_LIB);
 
     ImmutableList<Artifact> ccLibraries = ccLibraries(objcProvider);
     ruleContext.registerAction(ObjcRuleClasses.spawnOnDarwinActionBuilder(ruleContext)
         .setMnemonic("ObjcLink")
-        .setExecutable(XCRUN)
+        .setExecutable(xcrunwrapper(ruleContext))
         .setCommandLine(new CustomCommandLine.Builder()
             .add(LIBTOOL)
             .add("-static")
-            .add("-arch_only").add(objcConfiguration.getIosCpu())
-            .add("-syslibroot").add(IosSdkCommands.sdkDir(objcConfiguration))
+            .add("-arch_only").add(appleConfiguration.getIosCpu())
+            .add("-syslibroot").add(AppleToolchain.sdkDir())
             .add("-o").add(archive.getExecPathString())
             .addExecPaths(objcProvider.get(LIBRARY))
             .addExecPaths(objcProvider.get(IMPORTED_LIBRARY))
@@ -716,6 +797,7 @@ public final class CompilationSupport {
             .addTransitiveInputs(objcProvider.get(FRAMEWORK_FILE))
             .addInputs(ccLibraries)
             .addInputs(extraLinkInputs)
+            .addInput(xcrunwrapper(ruleContext).getExecutable())
             .build(ruleContext));
 
     if (objcConfiguration.shouldStripBinary()) {
@@ -729,7 +811,7 @@ public final class CompilationSupport {
       ruleContext.registerAction(
           ObjcRuleClasses.spawnOnDarwinActionBuilder(ruleContext)
               .setMnemonic("ObjcBinarySymbolStrip")
-              .setExecutable(XCRUN)
+              .setExecutable(xcrunwrapper(ruleContext))
               .setCommandLine(symbolStripCommandLine(stripArgs, binaryToLink, strippedBinary))
               .addOutput(strippedBinary)
               .addInput(binaryToLink)
@@ -759,9 +841,10 @@ public final class CompilationSupport {
       ObjcProvider objcProvider, Artifact linkedBinary, Optional<Artifact> dsymBundle,
       ImmutableList<Artifact> ccLibraries) {
     ObjcConfiguration objcConfiguration = ObjcRuleClasses.objcConfiguration(ruleContext);
+    AppleConfiguration appleConfiguration = ruleContext.getFragment(AppleConfiguration.class);
 
     CustomCommandLine.Builder commandLine = CustomCommandLine.builder()
-        .addPath(XCRUN);
+        .addPath(xcrunwrapper(ruleContext).getExecutable().getExecPath());
 
     if (objcProvider.is(USES_CPP)) {
       commandLine
@@ -779,13 +862,13 @@ public final class CompilationSupport {
     }
 
     commandLine
-        .add(IosSdkCommands.commonLinkAndCompileFlagsForClang(objcProvider, objcConfiguration))
+        .add(commonLinkAndCompileFlagsForClang(objcProvider, objcConfiguration, appleConfiguration))
         .add("-Xlinker")
         .add("-objc_abi_version")
         .add("-Xlinker")
         .add("2")
         .add("-fobjc-link-runtime")
-        .add(IosSdkCommands.DEFAULT_LINKER_FLAGS)
+        .add(DEFAULT_LINKER_FLAGS)
         .addBeforeEach("-framework", frameworkNames(objcProvider))
         .addBeforeEach("-weak_framework", SdkFramework.names(objcProvider.get(WEAK_SDK_FRAMEWORK)))
         .addFormatEach("-l%s", libraryNames(objcProvider))
@@ -803,7 +886,7 @@ public final class CompilationSupport {
     }
 
     if (objcProvider.is(USES_SWIFT)) {
-      commandLine.add("-L").add(IosSdkCommands.swiftLibDir(objcConfiguration));
+      commandLine.add("-L").add(AppleToolchain.swiftLibDir(appleConfiguration));
     }
 
     if (objcProvider.is(USES_SWIFT) || objcProvider.is(USES_FRAMEWORKS)) {
@@ -821,7 +904,7 @@ public final class CompilationSupport {
       PathFragment dsymPath = FileSystemUtils.removeExtension(dsymBundle.get().getExecPath());
       commandLine
           .add("&&")
-          .addPath(XCRUN)
+          .addPath(xcrunwrapper(ruleContext).getExecutable().getExecPath())
           .add(DSYMUTIL)
           .add(linkedBinary.getExecPathString())
           .add("-o " + dsymPath)
@@ -870,7 +953,8 @@ public final class CompilationSupport {
    * All framework names to pass to the linker using {@code -framework} flags. For a framework in
    * the directory foo/bar.framework, the name is "bar". Each framework is found without using the
    * full path by means of the framework search paths. The search paths are added by
-   * {@link IosSdkCommands#commonLinkAndCompileFlagsForClang(ObjcProvider, ObjcConfiguration)}).
+   * {@link #commonLinkAndCompileFlagsForClang(ObjcProvider, ObjcConfiguration,
+   * AppleConfiguration)}).
    *
    * <p>It's awful that we can't pass the full path to the framework and avoid framework search
    * paths, but this is imposed on us by clang. clang does not support passing the full path to the
@@ -1170,6 +1254,12 @@ public final class CompilationSupport {
    * Returns the name of Swift module for this target.
    */
   private String getModuleName() {
+    // If we have module maps support, we need to use the generated module name, this way
+    // clang can properly load objc part of the module via -import-underlying-module command.
+    if (ObjcRuleClasses.objcConfiguration(ruleContext).moduleMapsEnabled()) {
+      return ObjcRuleClasses.intermediateArtifacts(ruleContext).moduleMap().getName();
+    }
+    // Otherwise, just use target name, it doesn't matter.
     return ruleContext.getLabel().getName();
   }
 
@@ -1190,6 +1280,80 @@ public final class CompilationSupport {
           addOutputs(metadataFilesBuilder, action, ObjcRuleClasses.COVERAGE_NOTES);
         }
       }
+    }
+  }
+  
+  private static Iterable<PathFragment> uniqueParentDirectories(Iterable<PathFragment> paths) {
+    ImmutableSet.Builder<PathFragment> parents = new ImmutableSet.Builder<>();
+    for (PathFragment path : paths) {
+      parents.add(path.getParentDirectory());
+    }
+    return parents.build();
+  }
+
+  /**
+   * Returns the target string for swift compiler. For example, "x86_64-apple-ios8.2"
+   */
+  @VisibleForTesting
+  static String swiftTarget(AppleConfiguration configuration) {
+    return configuration.getIosCpu() + "-apple-ios" + configuration.getIosSdkVersion();
+  }
+  
+  /**
+   * Returns a list of clang flags used for all link and compile actions executed through clang.
+   */
+  private static List<String> commonLinkAndCompileFlagsForClang(
+      ObjcProvider provider, ObjcConfiguration objcConfiguration,
+      AppleConfiguration appleConfiguration) {
+    ImmutableList.Builder<String> builder = new ImmutableList.Builder<>();
+    if (Platform.forIosArch(appleConfiguration.getIosCpu()) == Platform.IOS_SIMULATOR) {
+      builder.add("-mios-simulator-version-min=" + objcConfiguration.getMinimumOs());
+    } else {
+      builder.add("-miphoneos-version-min=" + objcConfiguration.getMinimumOs());
+    }
+
+    if (objcConfiguration.generateDebugSymbols()) {
+      builder.add("-g");
+    }
+
+    return builder
+        .add("-arch", appleConfiguration.getIosCpu())
+        .add("-isysroot", AppleToolchain.sdkDir())
+        // TODO(bazel-team): Pass framework search paths to Xcodegen.
+        .add("-F", AppleToolchain.sdkDeveloperFrameworkDir())
+        // As of sdk8.1, XCTest is in a base Framework dir
+        .add("-F", AppleToolchain.platformDeveloperFrameworkDir(appleConfiguration))
+        // Add custom (non-SDK) framework search paths. For each framework foo/bar.framework,
+        // include "foo" as a search path.
+        .addAll(Interspersing.beforeEach(
+            "-F",
+            PathFragment.safePathStrings(uniqueParentDirectories(provider.get(FRAMEWORK_DIR)))))
+        .build();
+  }
+
+  private static Iterable<String> compileFlagsForClang(AppleConfiguration configuration) {
+    return Iterables.concat(
+        AppleToolchain.DEFAULT_WARNINGS.values(),
+        platformSpecificCompileFlagsForClang(configuration),
+        DEFAULT_COMPILER_FLAGS
+    );
+  }
+
+  private static List<String> platformSpecificCompileFlagsForClang(
+      AppleConfiguration configuration) {
+    switch (Platform.forIosArch(configuration.getIosCpu())) {
+      case IOS_DEVICE:
+        return ImmutableList.of();
+      case IOS_SIMULATOR:
+        // These are added by Xcode when building, because the simulator is built on OSX
+        // frameworks so we aim compile to match the OSX objc runtime.
+        return ImmutableList.of(
+            "-fexceptions",
+            "-fasm-blocks",
+            "-fobjc-abi-version=2",
+            "-fobjc-legacy-dispatch");
+      default:
+        throw new AssertionError();
     }
   }
 }

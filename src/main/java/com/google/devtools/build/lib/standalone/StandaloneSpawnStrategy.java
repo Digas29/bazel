@@ -22,7 +22,7 @@ import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.SpawnActionContext;
 import com.google.devtools.build.lib.actions.UserExecException;
 import com.google.devtools.build.lib.cmdline.Label;
-import com.google.devtools.build.lib.rules.objc.ObjcConfiguration;
+import com.google.devtools.build.lib.rules.apple.AppleConfiguration;
 import com.google.devtools.build.lib.shell.AbnormalTerminationException;
 import com.google.devtools.build.lib.shell.Command;
 import com.google.devtools.build.lib.shell.CommandException;
@@ -42,7 +42,7 @@ import java.util.List;
 /**
  * Strategy that uses subprocessing to execute a process.
  */
-@ExecutionStrategy(name = { "standalone" }, contextType = SpawnActionContext.class)
+@ExecutionStrategy(name = { "standalone", "local" }, contextType = SpawnActionContext.class)
 public class StandaloneSpawnStrategy implements SpawnActionContext {
   private final boolean verboseFailures;
   private final Path processWrapper;
@@ -152,13 +152,13 @@ public class StandaloneSpawnStrategy implements SpawnActionContext {
       throws UserExecException {
     ImmutableMap.Builder<String, String> newEnvBuilder = ImmutableMap.builder();
     newEnvBuilder.putAll(env);
-    if (env.containsKey(ObjcConfiguration.APPLE_SDK_VERSION_ENV_NAME)) {
+    if (env.containsKey(AppleConfiguration.APPLE_SDK_VERSION_ENV_NAME)) {
       // The Apple platform is needed to select the appropriate SDK.
-      if (!env.containsKey(ObjcConfiguration.APPLE_SDK_PLATFORM_ENV_NAME)) {
+      if (!env.containsKey(AppleConfiguration.APPLE_SDK_PLATFORM_ENV_NAME)) {
         throw new UserExecException("Could not resolve apple platform for determining SDK");
       }
-      String iosSdkVersion = env.get(ObjcConfiguration.APPLE_SDK_VERSION_ENV_NAME);
-      String appleSdkPlatform = env.get(ObjcConfiguration.APPLE_SDK_PLATFORM_ENV_NAME);
+      String iosSdkVersion = env.get(AppleConfiguration.APPLE_SDK_VERSION_ENV_NAME);
+      String appleSdkPlatform = env.get(AppleConfiguration.APPLE_SDK_PLATFORM_ENV_NAME);
       // TODO(bazel-team): Determine and set DEVELOPER_DIR.
       addSdkRootEnv(newEnvBuilder, iosSdkVersion, appleSdkPlatform);
     }
@@ -185,7 +185,8 @@ public class StandaloneSpawnStrategy implements SpawnActionContext {
             xcrunStatus.toString(), new String(xcrunResult.getStderr(), StandardCharsets.UTF_8)));
       }
 
-      envBuilder.put("SDKROOT", new String(xcrunResult.getStdout(), StandardCharsets.UTF_8));
+      // calling xcrun via Command returns a value with a newline on the end.
+      envBuilder.put("SDKROOT", new String(xcrunResult.getStdout(), StandardCharsets.UTF_8).trim());
     } catch (AbnormalTerminationException e) {
       String message = String.format("%s : %s",
           e.getResult().getTerminationStatus(), new String(e.getResult().getStderr()));

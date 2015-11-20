@@ -244,11 +244,6 @@ android_sdk_repository(
     build_tools_version = "$ANDROID_SDK_TOOLS_VERSION",
     api_level = $ANDROID_SDK_API_LEVEL,
 )
-
-android_local_tools_repository(
-    name = "androidtools",
-    path = "$ANDROID_TOOLS",
-)
 EOF
 }
 
@@ -331,6 +326,7 @@ function setup_objc_test_support() {
   [ -e tools/objc/precomp_xcodegen_deploy.jar ] || ln -sv ${xcodegen_path} tools/objc/precomp_xcodegen_deploy.jar
   [ -e tools/objc/StdRedirect.dylib ] || ln -sv ${stdredirect_path} tools/objc/StdRedirect.dylib
   [ -e tools/objc/swiftstdlibtoolwrapper.sh ] || ln -sv ${swiftstdlibtoolwrapper_path} tools/objc/swiftstdlibtoolwrapper.sh
+  [ -e tools/objc/xcrunwrapper.sh ] || ln -sv ${xcrunwrapper_path} tools/objc/xcrunwrapper.sh
   [ -e tools/objc/realpath ] || ln -sv ${realpath_path} tools/objc/realpath
   [ -e tools/objc/environment_plist.sh ] || ln -sv ${environment_plist_path} tools/objc/environment_plist.sh
 
@@ -374,6 +370,7 @@ function setup_clean_workspace() {
     { echo "Failed to create workspace" >&2; exit 1; }
   export BAZEL_INSTALL_BASE=$(bazel info install_base)
   export BAZEL_GENFILES_DIR=$(bazel info bazel-genfiles)
+  export BAZEL_BIN_DIR=$(bazel info bazel-bin)
 }
 
 # Clean up all files that are not in tools directories, to restart

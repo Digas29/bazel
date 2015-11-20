@@ -18,8 +18,8 @@ import static com.google.devtools.build.lib.rules.objc.J2ObjcSource.SourceType;
 
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.analysis.Aspect;
-import com.google.devtools.build.lib.analysis.ConfiguredAspectFactory;
+import com.google.devtools.build.lib.analysis.ConfiguredAspect;
+import com.google.devtools.build.lib.analysis.ConfiguredNativeAspectFactory;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
@@ -49,10 +49,10 @@ import com.google.devtools.build.lib.vfs.PathFragment;
  * by this class and provided by proto_library will be exported all the way to objc_binary for ObjC
  * compilation and linking into the final application bundle.
  */
-public abstract class AbstractJ2ObjcProtoAspect implements ConfiguredAspectFactory {
+public abstract class AbstractJ2ObjcProtoAspect implements ConfiguredNativeAspectFactory {
   public static final String NAME = "J2ObjcProtoAspect";
 
-  public AspectDefinition getDefinition() {
+  public AspectDefinition getDefinition(AspectParameters aspectParameters) {
     AspectDefinition.Builder builder = new AspectDefinition.Builder("J2ObjcProtoAspect")
         .requireProvider(ProtoSourcesProvider.class)
         .attributeAspect("deps", getClass())
@@ -75,14 +75,14 @@ public abstract class AbstractJ2ObjcProtoAspect implements ConfiguredAspectFacto
   protected abstract boolean checkShouldCreateAspect(RuleContext ruleContext);
 
   @Override
-  public Aspect create(ConfiguredTarget base, RuleContext ruleContext,
-      AspectParameters parameters) {
+  public ConfiguredAspect create(
+      ConfiguredTarget base, RuleContext ruleContext, AspectParameters parameters) {
     if (!checkShouldCreateAspect(ruleContext)) {
-      return new Aspect.Builder(NAME).build();
+      return new ConfiguredAspect.Builder(NAME, ruleContext).build();
     }
 
     ProtoSourcesProvider protoSourcesProvider = base.getProvider(ProtoSourcesProvider.class);
-    ImmutableList<Artifact> protoSources = protoSourcesProvider.getProtoSources();
+    ImmutableList<Artifact> protoSources = protoSourcesProvider.getDirectProtoSources();
     NestedSet<Artifact> transitiveImports = protoSourcesProvider.getTransitiveImports();
 
     J2ObjcSrcsProvider.Builder srcsBuilder = new J2ObjcSrcsProvider.Builder();
@@ -110,7 +110,7 @@ public abstract class AbstractJ2ObjcProtoAspect implements ConfiguredAspectFacto
     NestedSet<Artifact> j2ObjcTransitiveClassMappingFiles = j2ObjcTransitiveClassMappingFiles(
         ruleContext, classMappingFiles);
 
-    return new Aspect.Builder(NAME)
+    return new ConfiguredAspect.Builder(NAME, ruleContext)
         .addProvider(J2ObjcSrcsProvider.class, j2objcSrcsProvider)
         .addProvider(
             J2ObjcMappingFileProvider.class,

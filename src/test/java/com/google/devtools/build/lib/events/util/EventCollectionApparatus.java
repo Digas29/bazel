@@ -15,6 +15,7 @@ package com.google.devtools.build.lib.events.util;
 
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventCollector;
+import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.EventKind;
 import com.google.devtools.build.lib.events.PrintingEventHandler;
 import com.google.devtools.build.lib.events.Reporter;
@@ -22,16 +23,20 @@ import com.google.devtools.build.lib.syntax.Environment;
 import com.google.devtools.build.lib.testutil.MoreAsserts;
 import com.google.devtools.build.lib.util.io.OutErr;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
 /**
  * An apparatus for reporting / collecting events.
  */
-public class EventCollectionApparatus {
+public final class EventCollectionApparatus {
   private EventCollector eventCollector;
   private Reporter reporter;
   private PrintingEventHandler printingEventHandler;
+
+  private boolean failFast;
+  private List<EventHandler> handlers = new ArrayList<>();
 
   /**
    * Determine which events the {@link #collector()} created by this apparatus
@@ -39,19 +44,30 @@ public class EventCollectionApparatus {
    */
   public EventCollectionApparatus(Set<EventKind> mask) {
     eventCollector = new EventCollector(mask);
-    reporter = new Reporter(eventCollector);
     printingEventHandler = new PrintingEventHandler(EventKind.ERRORS_AND_WARNINGS_AND_OUTPUT);
-    reporter.addHandler(printingEventHandler);
-
+    reporter = new Reporter(eventCollector, printingEventHandler);
     this.setFailFast(true);
   }
 
   public EventCollectionApparatus() {
-    this(EventKind.ERRORS_AND_WARNINGS);
+    this(EventKind.ERRORS_WARNINGS_AND_INFO);
   }
 
   public void clear() {
     eventCollector.clear();
+  }
+
+  public void initExternal(Reporter reporter) {
+    // TODO(ulfjack): Changes to the EventCollectionApparatus are not reflected in the external
+    // reporter, i.e., this is a one-shot change. Maybe we should store the external reporter here?
+    reporter.addHandler(eventCollector);
+    reporter.addHandler(printingEventHandler);
+    for (EventHandler handler : handlers) {
+      reporter.addHandler(handler);
+    }
+    if (failFast) {
+      reporter.addHandler(Environment.FAIL_FAST_HANDLER);
+    }
   }
 
   /**
@@ -61,11 +77,17 @@ public class EventCollectionApparatus {
    * Default: {@code true}.
    */
   public void setFailFast(boolean failFast) {
+    this.failFast = failFast;
     if (failFast) {
       reporter.addHandler(Environment.FAIL_FAST_HANDLER);
     } else {
       reporter.removeHandler(Environment.FAIL_FAST_HANDLER);
     }
+  }
+
+  public void addHandler(EventHandler eventHandler) {
+    reporter.addHandler(eventHandler);
+    handlers.add(eventHandler);
   }
 
   /**
@@ -80,6 +102,10 @@ public class EventCollectionApparatus {
    */
   public EventCollector collector() {
     return eventCollector;
+  }
+
+  public Iterable<Event> infos() {
+    return eventCollector.filtered(EventKind.INFO);
   }
 
   public Iterable<Event> errors() {
@@ -100,13 +126,11 @@ public class EventCollectionApparatus {
 
   /**
    * Utility method: Asserts that the {@link #collector()} has not collected
-   * any events.
-   *
-   * @throws IllegalStateException If the apparatus has not yet been
-   *    initialized by calling {@link #reporter()} or {@link #collector()}.
+   * any warnings or errors.
    */
-  public void assertNoEvents() {
-    MoreAsserts.assertNoEvents(eventCollector);
+  public void assertNoWarningsOrErrors() {
+    MoreAsserts.assertNoEvents(warnings());
+    MoreAsserts.assertNoEvents(errors());
   }
 
   /**
@@ -131,6 +155,14 @@ public class EventCollectionApparatus {
    */
   public Event assertContainsWarning(String expectedMessage) {
     return MoreAsserts.assertContainsEvent(eventCollector, expectedMessage, EventKind.WARNING);
+  }
+
+  /**
+   * Utility method: Assert that the {@link #collector()} has received an event of the given type
+   * and with the {@code expectedMessage}.
+   */
+  public Event assertContainsEvent(EventKind kind, String expectedMessage) {
+    return MoreAsserts.assertContainsEvent(eventCollector, expectedMessage, kind);
   }
 
   public List<Event> assertContainsEventWithFrequency(String expectedMessage,

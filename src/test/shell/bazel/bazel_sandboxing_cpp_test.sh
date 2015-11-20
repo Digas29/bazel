@@ -73,14 +73,8 @@ int main(int argc, char** argv) {
 EOF
 }
 
-function tear_down() {
-  rm -rf examples/cpp
-}
-
+# Tests for #473: Sandboxing for C++ compilation was accidentally disabled.
 function test_sandboxed_cpp_build_rebuilds_on_change() {
-  bazel --batch clean &> $TEST_log \
-    || fail "bazel clean failed"
-
   bazel build --spawn_strategy=sandboxed //examples/cpp:hello-world &> $TEST_log \
     || fail "Building hello-world failed"
 
@@ -101,9 +95,6 @@ function test_sandboxed_cpp_build_rebuilds_on_change() {
 }
 
 function test_sandboxed_cpp_build_catches_missing_header_via_sandbox() {
-  bazel --batch clean &> $TEST_log \
-    || fail "bazel clean failed"
-
   cat << 'EOF' > examples/cpp/BUILD
 cc_library(
     name = "hello-lib",
@@ -111,20 +102,18 @@ cc_library(
 )
 EOF
 
-  bazel build --hdrs_check=strict --spawn_strategy=sandboxed //examples/cpp:hello-lib &> $TEST_log \
+  bazel build --spawn_strategy=sandboxed //examples/cpp:hello-lib &> $TEST_log \
     && fail "build should not have succeeded with missing header file"
 
-  fgrep "undeclared inclusion(s) in rule '//examples/cpp:hello-lib'" $TEST_log \
-    || fail "could not find 'undeclared inclusion' error message in bazel output"
+  fgrep "fatal error: examples/cpp/lib/hello-lib.h: No such file or directory" $TEST_log \
+    || fgrep "fatal error: 'examples/cpp/lib/hello-lib.h' file not found" $TEST_log \
+    || fail "could not find 'No such file or directory' error message in bazel output"
 }
 
 # TODO(philwo) turns out, we have this special "hdrs" attribute and in theory you can only include
 # header files from libraries that are specified in "hdrs" and not "srcs", but we never check that,
 # so the test fails. :(
 function DISABLED_test_sandboxed_cpp_build_catches_header_only_in_srcs() {
-  bazel --batch clean &> $TEST_log \
-    || fail "bazel clean failed"
-
   cat << 'EOF' > examples/cpp/BUILD
 cc_library(
     name = "hello-lib",
@@ -149,10 +138,7 @@ EOF
 }
 
 function test_standalone_cpp_build_rebuilds_on_change() {
-  bazel --batch clean &> $TEST_log \
-    || fail "bazel clean failed"
-
-  bazel build --hdrs_check=strict --spawn_strategy=standalone //examples/cpp:hello-world &> $TEST_log \
+  bazel build --spawn_strategy=standalone //examples/cpp:hello-world &> $TEST_log \
     || fail "Building hello-world failed"
 
   bazel-bin/examples/cpp/hello-world | fgrep "greetings from the header" \
@@ -164,7 +150,7 @@ function test_standalone_cpp_build_rebuilds_on_change() {
   mv tmp examples/cpp/lib/hello-lib.h \
     || fail "moving modified header file back to examples/cpp/lib/hello-lib.h failed"
 
-  bazel build --hdrs_check=strict --spawn_strategy=standalone //examples/cpp:hello-world &> $TEST_log \
+  bazel build --spawn_strategy=standalone //examples/cpp:hello-world &> $TEST_log \
     || fail "Building modified hello-world failed"
 
   bazel-bin/examples/cpp/hello-world | fgrep "greetings from the modified header" \
@@ -172,9 +158,6 @@ function test_standalone_cpp_build_rebuilds_on_change() {
 }
 
 function test_standalone_cpp_build_catches_missing_header() {
-  bazel --batch clean &> $TEST_log \
-    || fail "bazel clean failed"
-
   cat << 'EOF' > examples/cpp/BUILD
 cc_library(
     name = "hello-lib",
@@ -182,17 +165,16 @@ cc_library(
 )
 EOF
 
-  bazel build --hdrs_check=strict --spawn_strategy=standalone //examples/cpp:hello-lib &> $TEST_log \
+  bazel build --spawn_strategy=standalone //examples/cpp:hello-lib &> $TEST_log \
     && fail "build should not have succeeded with missing header file"
 
   fgrep "undeclared inclusion(s) in rule '//examples/cpp:hello-lib'" $TEST_log \
     || fail "could not find 'undeclared inclusion' error message in bazel output"
 }
 
+# TODO(philwo) disabled for the same reason as test_sandboxed_cpp_build_catches_header_only_in_srcs
+# above.
 function DISABLED_test_standalone_cpp_build_catches_header_only_in_srcs() {
-  bazel --batch clean &> $TEST_log \
-    || fail "bazel clean failed"
-
   cat << 'EOF' > examples/cpp/BUILD
 cc_library(
     name = "hello-lib",
@@ -206,10 +188,10 @@ cc_binary(
 )
 EOF
 
-  bazel build --hdrs_check=strict --spawn_strategy=standalone //examples/cpp:hello-lib &> $TEST_log \
+  bazel build --spawn_strategy=standalone //examples/cpp:hello-lib &> $TEST_log \
     || fail "building hello-lib should have succeeded with header file in srcs"
 
-  bazel build --hdrs_check=strict --spawn_strategy=standalone //examples/cpp:hello-world &> $TEST_log \
+  bazel build --spawn_strategy=standalone //examples/cpp:hello-world &> $TEST_log \
     && fail "building hello-world should not have succeeded with library header file in srcs"
 
   fgrep "undeclared inclusion(s) in rule '//examples/cpp:hello-world'" $TEST_log \

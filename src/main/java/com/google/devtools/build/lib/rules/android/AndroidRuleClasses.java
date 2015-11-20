@@ -72,6 +72,10 @@ public final class AndroidRuleClasses {
       fromTemplates("%{name}.aar");
   public static final SafeImplicitOutputsFunction ANDROID_LIBRARY_AAR_CLASSES_JAR =
       fromTemplates("%{name}_aar/classes.jar");
+  public static final SafeImplicitOutputsFunction ANDROID_RESOURCES_SOURCE_JAR =
+      fromTemplates("%{name}_resources-src.jar");
+  public static final SafeImplicitOutputsFunction ANDROID_RESOURCES_CLASS_JAR =
+      fromTemplates("%{name}_resources.jar");
   public static final SafeImplicitOutputsFunction ANDROID_RESOURCES_APK =
       fromTemplates("%{name}.ap_");
   public static final SafeImplicitOutputsFunction ANDROID_INCREMENTAL_RESOURCES_APK =
@@ -119,31 +123,32 @@ public final class AndroidRuleClasses {
   public static final SafeImplicitOutputsFunction JAVA_RESOURCES_JAR =
       fromTemplates("%{name}_files/java_resources.jar");
   public static final String MANIFEST_MERGE_TOOL_LABEL =
-      Constants.ANDROID_DEP_PREFIX + "merge_manifests";
+      Constants.TOOLS_REPOSITORY + "//tools/android:merge_manifests";
   public static final String BUILD_INCREMENTAL_DEXMANIFEST_LABEL =
-      Constants.ANDROID_DEP_PREFIX + "build_incremental_dexmanifest";
+      Constants.TOOLS_REPOSITORY + "//tools/android:build_incremental_dexmanifest";
   public static final String STUBIFY_MANIFEST_LABEL =
-      Constants.ANDROID_DEP_PREFIX + "stubify_manifest";
+      Constants.TOOLS_REPOSITORY + "//tools/android:stubify_manifest";
   public static final String INCREMENTAL_INSTALL_LABEL =
-      Constants.ANDROID_DEP_PREFIX + "incremental_install";
+      Constants.TOOLS_REPOSITORY + "//tools/android:incremental_install";
   public static final String BUILD_SPLIT_MANIFEST_LABEL =
-      Constants.ANDROID_DEP_PREFIX + "build_split_manifest";
+      Constants.TOOLS_REPOSITORY + "//tools/android:build_split_manifest";
   public static final String STRIP_RESOURCES_LABEL =
-      Constants.ANDROID_DEP_PREFIX + "strip_resources";
+      Constants.TOOLS_REPOSITORY + "//tools/android:strip_resources";
 
   public static final Label DEFAULT_ANDROID_SDK =
       Label.parseAbsoluteUnchecked(
           Constants.ANDROID_DEFAULT_SDK);
   public static final Label DEFAULT_INCREMENTAL_STUB_APPLICATION =
       Label.parseAbsoluteUnchecked(
-          Constants.ANDROID_DEP_PREFIX + "incremental_stub_application");
+          Constants.TOOLS_REPOSITORY + "//tools/android:incremental_stub_application");
   public static final Label DEFAULT_INCREMENTAL_SPLIT_STUB_APPLICATION =
       Label.parseAbsoluteUnchecked(
-          Constants.ANDROID_DEP_PREFIX + "incremental_split_stub_application");
+          Constants.TOOLS_REPOSITORY + "//tools/android:incremental_split_stub_application");
   public static final Label DEFAULT_RESOURCES_PROCESSOR =
-      Label.parseAbsoluteUnchecked(Constants.ANDROID_DEP_PREFIX + "resources_processor");
+      Label.parseAbsoluteUnchecked(
+          Constants.TOOLS_REPOSITORY + "//tools/android:resources_processor");
   public static final Label DEFAULT_AAR_GENERATOR =
-      Label.parseAbsoluteUnchecked(Constants.ANDROID_DEP_PREFIX + "aar_generator");
+      Label.parseAbsoluteUnchecked(Constants.TOOLS_REPOSITORY + "//tools/android:aar_generator");
 
   /**
    * Implementation for the :proguard attribute.
@@ -539,7 +544,7 @@ public final class AndroidRuleClasses {
               .value(env.getLabel(
                   Constants.TOOLS_REPOSITORY + "//third_party/java/jarjar:jarjar_bin")))
           .add(attr("$idlclass", LABEL).cfg(HOST).exec()
-              .value(env.getLabel(Constants.ANDROID_DEP_PREFIX + "IdlClass")))
+              .value(env.getLabel(Constants.TOOLS_REPOSITORY + "//tools/android:IdlClass")))
           .build();
     }
 
@@ -582,8 +587,7 @@ public final class AndroidRuleClasses {
           <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
           .add(attr("srcs", LABEL_LIST)
               .direct_compile_time_input()
-              .allowedFileTypes(JavaSemantics.JAVA_SOURCE, JavaSemantics.JAR,
-                  JavaSemantics.SOURCE_JAR))
+              .allowedFileTypes(JavaSemantics.JAVA_SOURCE, JavaSemantics.SOURCE_JAR))
           /* <!-- #BLAZE_RULE($android_binary_base).ATTRIBUTE(deps) -->
           The list of other libraries to be linked in to the binary target.
           ${SYNOPSIS}
@@ -603,9 +607,9 @@ public final class AndroidRuleClasses {
           .add(attr("$stubify_manifest", LABEL).cfg(HOST).exec()
               .value(env.getLabel(AndroidRuleClasses.STUBIFY_MANIFEST_LABEL)))
           .add(attr("$shuffle_jars", LABEL).cfg(HOST).exec()
-              .value(env.getLabel(Constants.ANDROID_DEP_PREFIX + "shuffle_jars")))
+              .value(env.getLabel(Constants.TOOLS_REPOSITORY + "//tools/android:shuffle_jars")))
           .add(attr("$merge_dexzips", LABEL).cfg(HOST).exec()
-              .value(env.getLabel(Constants.ANDROID_DEP_PREFIX + "merge_dexzips")))
+              .value(env.getLabel(Constants.TOOLS_REPOSITORY + "//tools/android:merge_dexzips")))
           .add(attr("$incremental_install", LABEL).cfg(HOST).exec()
               .value(env.getLabel(INCREMENTAL_INSTALL_LABEL)))
           .add(attr("$build_split_manifest", LABEL).cfg(HOST).exec()
@@ -678,6 +682,13 @@ com/google/common/base/Objects.class
           <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
           .add(attr("proguard_generate_mapping", BOOLEAN).value(false)
               .nonconfigurable("value is referenced in an ImplicitOutputsFunction"))
+          /* <!-- #BLAZE_RULE($android_binary_base).ATTRIBUTE(proguard_apply_mapping) -->
+          File to be used as a mapping for proguard.
+          ${SYNOPSIS}
+          A mapping file generated by <code>proguard_generate_mapping</code> to be
+          re-used to apply the same mapping to a new build.
+          <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
+          .add(attr("proguard_apply_mapping", LABEL).legacyAllowAnyFileType())
           /* <!-- #BLAZE_RULE($android_binary_base).ATTRIBUTE(legacy_native_support) -->
           Enables legacy native support, where pre-compiled native libraries are copied
           directly into the APK.

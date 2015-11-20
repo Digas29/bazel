@@ -32,7 +32,7 @@ import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
-import com.google.devtools.build.lib.packages.AspectParameters;
+import com.google.devtools.build.lib.packages.Aspect;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.ConfigurationFragmentPolicy;
 import com.google.devtools.build.lib.packages.ConfigurationFragmentPolicy.MissingFragmentPolicy;
@@ -226,25 +226,26 @@ public final class ConfiguredTargetFactory {
         .setVisibility(convertVisibility(prerequisiteMap, env.getEventHandler(), rule, null))
         .setPrerequisites(prerequisiteMap)
         .setConfigConditions(configConditions)
+        .setUniversalFragment(ruleClassProvider.getUniversalFragment())
         .build();
     if (ruleContext.hasErrors()) {
       return null;
     }
     ConfigurationFragmentPolicy configurationFragmentPolicy =
         rule.getRuleClassObject().getConfigurationFragmentPolicy();
-    if (!configurationFragmentPolicy.getRequiredConfigurationFragments().isEmpty()) {
-      MissingFragmentPolicy missingFragmentPolicy =
-          configurationFragmentPolicy.getMissingFragmentPolicy();
-      if (missingFragmentPolicy != MissingFragmentPolicy.IGNORE
-          && !configuration.hasAllFragments(
-              configurationFragmentPolicy.getRequiredConfigurationFragments())) {
-        if (missingFragmentPolicy == MissingFragmentPolicy.FAIL_ANALYSIS) {
-          ruleContext.ruleError(missingFragmentError(ruleContext, configurationFragmentPolicy));
-          return null;
-        }
-        return createFailConfiguredTarget(ruleContext);
+
+    MissingFragmentPolicy missingFragmentPolicy =
+        configurationFragmentPolicy.getMissingFragmentPolicy();
+    if (missingFragmentPolicy != MissingFragmentPolicy.IGNORE
+        && !configuration.hasAllFragments(
+            configurationFragmentPolicy.getRequiredConfigurationFragments())) {
+      if (missingFragmentPolicy == MissingFragmentPolicy.FAIL_ANALYSIS) {
+        ruleContext.ruleError(missingFragmentError(ruleContext, configurationFragmentPolicy));
+        return null;
       }
+      return createFailConfiguredTarget(ruleContext);
     }
+
     if (rule.getRuleClassObject().isSkylarkExecutable()) {
       // TODO(bazel-team): maybe merge with RuleConfiguredTargetBuilder?
       return SkylarkRuleConfiguredTargetBuilder.buildRule(
@@ -282,14 +283,14 @@ public final class ConfiguredTargetFactory {
   }
 
   /**
-   * Constructs an {@link Aspect}. Returns null if an error occurs; in that case,
+   * Constructs an {@link ConfiguredAspect}. Returns null if an error occurs; in that case,
    * {@code aspectFactory} should call one of the error reporting methods of {@link RuleContext}.
    */
-  public Aspect createAspect(
+  public ConfiguredAspect createAspect(
       AnalysisEnvironment env,
       RuleConfiguredTarget associatedTarget,
       ConfiguredAspectFactory aspectFactory,
-      AspectParameters aspectParameters,
+      Aspect aspect,
       ListMultimap<Attribute, ConfiguredTarget> prerequisiteMap,
       Set<ConfigMatchingProvider> configConditions,
       BuildConfiguration hostConfiguration)
@@ -299,17 +300,21 @@ public final class ConfiguredTargetFactory {
         associatedTarget.getConfiguration(),
         hostConfiguration,
         ruleClassProvider.getPrerequisiteValidator());
-    RuleContext ruleContext = builder
-        .setVisibility(convertVisibility(
-            prerequisiteMap, env.getEventHandler(), associatedTarget.getTarget(), null))
-        .setPrerequisites(prerequisiteMap)
-        .setConfigConditions(configConditions)
-        .build();
+    RuleContext ruleContext =
+        builder
+            .setVisibility(
+                convertVisibility(
+                    prerequisiteMap, env.getEventHandler(), associatedTarget.getTarget(), null))
+            .setPrerequisites(prerequisiteMap)
+            .setAspectAttributes(aspect.getDefinition().getAttributes())
+            .setConfigConditions(configConditions)
+            .setUniversalFragment(ruleClassProvider.getUniversalFragment())
+            .build();
     if (ruleContext.hasErrors()) {
       return null;
     }
 
-    return aspectFactory.create(associatedTarget, ruleContext, aspectParameters);
+    return aspectFactory.create(associatedTarget, ruleContext, aspect.getParameters());
   }
 
   /**

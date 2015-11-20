@@ -14,9 +14,11 @@
 
 package com.google.devtools.build.lib.rules.extra;
 
+import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicates;
 import com.google.common.collect.Collections2;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.actions.AbstractAction;
@@ -61,6 +63,18 @@ public final class ExtraAction extends SpawnAction {
   @GuardedBy("this")
   private boolean inputsKnown;
 
+  /**
+   * A long way to say (ExtraAction xa) -> xa.getShadowedAction().
+   */
+  public static final Function<ExtraAction, Action> GET_SHADOWED_ACTION =
+      new Function<ExtraAction, Action>() {
+        @Nullable
+        @Override
+        public Action apply(@Nullable ExtraAction extraAction) {
+          return extraAction != null ? extraAction.getShadowedAction() : null;
+        }
+      };
+
   public ExtraAction(
       ImmutableSet<Artifact> extraActionInputs,
       Map<PathFragment, Artifact> runfilesManifests,
@@ -74,6 +88,7 @@ public final class ExtraAction extends SpawnAction {
       String mnemonic) {
     super(
         shadowedAction.getOwner(),
+        ImmutableList.<Artifact>of(),
         createInputs(shadowedAction.getInputs(), extraActionInputs),
         outputs,
         AbstractAction.DEFAULT_RESOURCE_SET,

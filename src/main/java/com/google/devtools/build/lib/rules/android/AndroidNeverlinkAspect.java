@@ -14,8 +14,8 @@
 package com.google.devtools.build.lib.rules.android;
 
 import com.google.common.collect.ImmutableList;
-import com.google.devtools.build.lib.analysis.Aspect;
-import com.google.devtools.build.lib.analysis.ConfiguredAspectFactory;
+import com.google.devtools.build.lib.analysis.ConfiguredAspect;
+import com.google.devtools.build.lib.analysis.ConfiguredNativeAspectFactory;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
@@ -38,18 +38,18 @@ import java.util.List;
  * <p>One would think that using the compile time classpath would be enough, but alas, those are
  * ijars,
  */
-public class AndroidNeverlinkAspect implements ConfiguredAspectFactory {
+public class AndroidNeverlinkAspect implements ConfiguredNativeAspectFactory {
   public static final String NAME = "AndroidNeverlinkAspect";
   private static final ImmutableList<String> ATTRIBUTES =
       ImmutableList.of(
           "deps", "exports", "runtime_deps", "binary_under_test", "$instrumentation_test_runner");
 
   @Override
-  public Aspect create(ConfiguredTarget base, RuleContext ruleContext,
-      AspectParameters parameters) {
+  public ConfiguredAspect create(
+      ConfiguredTarget base, RuleContext ruleContext, AspectParameters parameters) {
     if (!JavaCommon.getConstraints(ruleContext).contains("android")
         && !ruleContext.getRule().getRuleClass().startsWith("android_")) {
-      return new Aspect.Builder(NAME).build();
+      return new ConfiguredAspect.Builder(NAME, ruleContext).build();
     }
 
     List<TransitiveInfoCollection> deps = new ArrayList<>();
@@ -65,7 +65,7 @@ public class AndroidNeverlinkAspect implements ConfiguredAspectFactory {
       deps.addAll(ruleContext.getPrerequisites(attribute, Mode.TARGET));
     }
 
-    return new Aspect.Builder(NAME)
+    return new ConfiguredAspect.Builder(NAME, ruleContext)
         .addProvider(
             AndroidNeverLinkLibrariesProvider.class,
             new AndroidNeverLinkLibrariesProvider(
@@ -77,7 +77,7 @@ public class AndroidNeverlinkAspect implements ConfiguredAspectFactory {
   }
 
   @Override
-  public AspectDefinition getDefinition() {
+  public AspectDefinition getDefinition(AspectParameters aspectParameters) {
     AspectDefinition.Builder builder = new AspectDefinition.Builder("AndroidNeverlinkAspect");
     for (String attribute : ATTRIBUTES) {
       builder.attributeAspect(attribute, AndroidNeverlinkAspect.class);

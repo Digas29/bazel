@@ -21,10 +21,10 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Lists;
 import com.google.devtools.build.lib.actions.Artifact.SpecialArtifactType;
-import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.cmdline.PackageIdentifier.RepositoryName;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
+import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
@@ -332,16 +332,12 @@ public class ArtifactFactory implements ArtifactResolver, ArtifactSerializer, Ar
       return null;
     }
 
-    // This obviously only works when a repository name does not contain a slash. However, this is
-    // fine, because LocalRepositoryFunction checks that the name doesn't contain one.
     RepositoryName repoName = PackageIdentifier.DEFAULT_REPOSITORY_NAME;
-    if (dir.segmentCount() >= 2 && dir.getSegment(0).equals("external")) {
-      try {
-        repoName = RepositoryName.create("@" + dir.getSegment(1));
-      } catch (LabelSyntaxException e) {
-        return null;
-      }
-      dir = dir.subFragment(2, dir.segmentCount());
+
+    Pair<RepositoryName, PathFragment> repo = RepositoryName.fromPathFragment(dir);
+    if (repo != null) {
+      repoName = repo.getFirst();
+      dir = repo.getSecond();
     }
 
     while (dir != null && !dir.equals(baseExecPath)) {
@@ -386,7 +382,7 @@ public class ArtifactFactory implements ArtifactResolver, ArtifactSerializer, Ar
         unresolvedPaths.add(execPath);
       }
     }
-    Map<PathFragment, Root> sourceRoots = resolver.findPackageRoots(unresolvedPaths);
+    Map<PathFragment, Root> sourceRoots = resolver.findPackageRootsForFiles(unresolvedPaths);
     // We are missing some dependencies. We need to rerun this method later.
     if (sourceRoots == null) {
       return null;
@@ -474,7 +470,8 @@ public class ArtifactFactory implements ArtifactResolver, ArtifactSerializer, Ar
       }
       return result;
     } else {
-      Map<PathFragment, Root> sourceRoots = resolver.findPackageRoots(Lists.newArrayList(execPath));
+      Map<PathFragment, Root> sourceRoots = resolver.findPackageRootsForFiles(
+          Lists.newArrayList(execPath));
       if (sourceRoots == null || sourceRoots.get(execPath) == null) {
         return null;
       }
