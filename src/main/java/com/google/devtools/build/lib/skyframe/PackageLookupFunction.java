@@ -73,6 +73,19 @@ public class PackageLookupFunction implements SkyFunction {
       return PackageLookupValue.DELETED_PACKAGE_VALUE;
     }
 
+    BlacklistedPackagePrefixesValue blacklistedPatternsValue =
+        (BlacklistedPackagePrefixesValue) env.getValue(BlacklistedPackagePrefixesValue.key());
+    if (blacklistedPatternsValue == null) {
+      return null;
+    }
+
+    PathFragment buildFileFragment = packageKey.getPackageFragment();
+    for (PathFragment pattern : blacklistedPatternsValue.getPatterns()) {
+      if (buildFileFragment.startsWith(pattern)) {
+        return PackageLookupValue.DELETED_PACKAGE_VALUE;
+      }
+    }
+
     // TODO(bazel-team): The following is O(n^2) on the number of elements on the package path due
     // to having restart the SkyFunction after every new dependency. However, if we try to batch
     // the missing value keys, more dependencies than necessary will be declared. This wart can be

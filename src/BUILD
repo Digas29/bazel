@@ -1,12 +1,13 @@
 # Packaging
 
-md5_cmd = "set -e -o pipefail && cat $(SRCS) | %s | awk '{ print $$1; }' > $@"
+md5_cmd = "set -e -o pipefail && cat $(SRCS) | sort | %s | awk '{ print $$1; }' > $@"
 
 # TODO(bazel-team): find a better way to handle dylib extensions.
 filegroup(
     name = "libunix",
     srcs = select({
         ":darwin": ["//src/main/native:libunix.dylib"],
+        ":darwin_x86_64": ["//src/main/native:libunix.dylib"],
         "//conditions:default": ["//src/main/native:libunix.so"],
     }),
     visibility = [
@@ -18,7 +19,7 @@ filegroup(
 [genrule(
     name = "install_base_key-file" + suffix,
     srcs = [
-        "//src/main/java:bazel-main_deploy.jar",
+        "//src/main/java/com/google/devtools/build/lib:bazel-main_deploy.jar",
         "//src/main/cpp:client",
         ":libunix",
         "//src/main/tools:build-runfiles",
@@ -29,6 +30,8 @@ filegroup(
     outs = ["install_base_key" + suffix],
     cmd = select({
         ":darwin": md5_cmd % "/sbin/md5",
+        ":darwin_x86_64": md5_cmd % "/sbin/md5",
+        ":freebsd": md5_cmd % "/sbin/md5",
         "//conditions:default": md5_cmd % "md5sum",
     }),
 ) for suffix, embedded_tools in {
@@ -52,7 +55,7 @@ genrule(
     outs = ["java.version"],
     cmd = """
           VERSION_LINE=$$(cat $< | grep target_version);
-          JAVA_VERSION=$$(echo $${VERSION_LINE} | sed -E 's/.*value="([^"])".*/\\1/');
+          JAVA_VERSION=$$(echo $${VERSION_LINE} | sed 's/.*value="\\([^"]\\)".*/\\1/');
           if [ -z "$${JAVA_VERSION}" ]; then
             echo "1.8" >$@  # Java 8 is the default
           elif [[ "$${JAVA_VERSION}" =~ ^[0-9]+$$ ]]; then
@@ -66,32 +69,22 @@ genrule(
 genrule(
     name = "embedded_tools",
     srcs = [
+        ":create_embedded_tools.sh",
         "//tools:embedded_tools_srcs",
         "//third_party:srcs",
         "//src/java_tools/buildjar/java/com/google/devtools/build/buildjar/jarhelper:srcs",
-        "//src/tools/android/java/com/google/devtools/build/android:srcs",
-        "//src/tools/android/java/com/google/devtools/build/android/idlclass:srcs",
+        "//src/tools/android/java/com/google/devtools/build/android:embedded_tools",
+        "//src/tools/android/java/com/google/devtools/build/android/idlclass:embedded_tools",
         "//src/tools/android/java/com/google/devtools/build/android/incrementaldeployment:srcs",
-        "//src/tools/android/java/com/google/devtools/build/android/ziputils:srcs",
+        "//src/tools/android/java/com/google/devtools/build/android/ziputils:embedded_tools",
         "//src/main/protobuf:srcs",
-        "//src/main/java:options-srcs",
+        "//src/java_tools/buildjar:JavaBuilder_deploy.jar",
+        "//src/java_tools/singlejar:SingleJar_deploy.jar",
+        "//src/java_tools/buildjar/java/com/google/devtools/build/buildjar/genclass:GenClass_deploy.jar",
+        "//third_party/ijar",
     ],
     outs = ["embedded_tools.zip"],
-    cmd = "\n".join([
-        "mkdir -p $(@D)/embedded-tools-zip",
-        "for i in $(SRCS); do",
-        "  mkdir -p $$(dirname $(@D)/embedded-tools-zip/$$i)",
-        "  cp $$i $$(dirname $(@D)/embedded-tools-zip/$$i)",
-        "done",
-        "touch $(@D)/embedded-tools-zip/WORKSPACE",
-        "mkdir -p $(@D)/embedded-tools-zip/tools/defaults",
-        "touch $(@D)/embedded-tools-zip/tools/defaults/BUILD",
-        "mv $(@D)/embedded-tools-zip/src/main/java/options.BUILD" +
-        " $(@D)/embedded-tools-zip/src/main/java/BUILD",
-        "find $(@D)/embedded-tools-zip -exec touch -t 198001010000.00 '{}' ';'",
-        "P=$$PWD; (cd $(@D)/embedded-tools-zip && zip -qrD $$P/$@ *)",
-        "rm -fr $(@D)/embedded-tools-zip",
-    ]),
+    cmd = "$(location :create_embedded_tools.sh) $@ $(SRCS)",
 )
 
 [genrule(
@@ -100,7 +93,7 @@ genrule(
         # The script assumes that the embedded tools zip (if exists) is the
         # first item here, the deploy jar the second and install base key is the
         # third
-        "//src/main/java:bazel-main_deploy.jar",
+        "//src/main/java/com/google/devtools/build/lib:bazel-main_deploy.jar",
         "install_base_key" + suffix,
         "//src/main/cpp:client",
         ":libunix",
@@ -142,6 +135,12 @@ genrule(
 config_setting(
     name = "darwin",
     values = {"cpu": "darwin"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "darwin_x86_64",
+    values = {"cpu": "darwin_x86_64"},
     visibility = ["//visibility:public"],
 )
 

@@ -18,13 +18,13 @@ import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.devtools.build.lib.packages.RuleClass.Builder.RuleClassType.ABSTRACT;
 import static com.google.devtools.build.lib.packages.RuleClass.Builder.RuleClassType.TEST;
 
-import com.google.common.base.Preconditions;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoFactory;
+import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.ConfigurationFragmentFactory;
 import com.google.devtools.build.lib.analysis.config.DefaultsPackage;
@@ -34,8 +34,8 @@ import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.graph.Digraph;
 import com.google.devtools.build.lib.graph.Node;
-import com.google.devtools.build.lib.packages.AspectFactory;
 import com.google.devtools.build.lib.packages.Attribute;
+import com.google.devtools.build.lib.packages.NativeAspectClass.NativeAspectFactory;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClassProvider;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
@@ -81,7 +81,7 @@ public class ConfiguredRuleClassProvider implements RuleClassProvider {
    */
   public static class Builder implements RuleDefinitionEnvironment {
     private final StringBuilder defaultWorkspaceFile = new StringBuilder();
-    private PathFragment preludePath;
+    private Label preludeLabel;
     private String runfilesPrefix;
     private final List<ConfigurationFragmentFactory> configurationFragments = new ArrayList<>();
     private final List<BuildInfoFactory> buildInfoFactories = new ArrayList<>();
@@ -90,7 +90,7 @@ public class ConfiguredRuleClassProvider implements RuleClassProvider {
     private final Map<String, RuleClass> ruleClassMap = new HashMap<>();
     private final  Map<String, Class<? extends RuleDefinition>> ruleDefinitionMap =
         new HashMap<>();
-    private final Map<String, Class<? extends AspectFactory<?, ?, ?>>> aspectFactoryMap =
+    private final Map<String, Class<? extends NativeAspectFactory>> aspectFactoryMap =
         new HashMap<>();
     private final Map<Class<? extends RuleDefinition>, RuleClass> ruleMap = new HashMap<>();
     private final Map<Class<? extends RuleDefinition>, RuleDefinition> ruleDefinitionInstanceCache =
@@ -98,6 +98,7 @@ public class ConfiguredRuleClassProvider implements RuleClassProvider {
     private final Digraph<Class<? extends RuleDefinition>> dependencyGraph =
         new Digraph<>();
     private ConfigurationCollectionFactory configurationCollectionFactory;
+    private Class<? extends BuildConfiguration.Fragment> universalFragment;
     private PrerequisiteValidator prerequisiteValidator;
     private ImmutableMap<String, SkylarkType> skylarkAccessibleJavaClasses = ImmutableMap.of();
 
@@ -105,11 +106,14 @@ public class ConfiguredRuleClassProvider implements RuleClassProvider {
       defaultWorkspaceFile.append(contents);
     }
 
-    public Builder setPrelude(String workspaceRelativePath) {
-      PathFragment preludePathFragment = new PathFragment(workspaceRelativePath);
-      Preconditions.checkArgument(!preludePathFragment.isAbsolute());
-      Preconditions.checkArgument(preludePathFragment.isNormalized());
-      this.preludePath = preludePathFragment;
+    public Builder setPrelude(String preludeLabelString) {
+      try {
+        this.preludeLabel = Label.parseAbsolute(preludeLabelString);
+      } catch (LabelSyntaxException e) {
+        String errorMsg =
+            String.format("Prelude label '%s' is invalid: %s", preludeLabelString, e.getMessage());
+        throw new IllegalArgumentException(errorMsg);
+      }
       return this;
     }
 
@@ -140,7 +144,7 @@ public class ConfiguredRuleClassProvider implements RuleClassProvider {
     }
 
     public Builder addAspectFactory(
-        String name, Class<? extends AspectFactory<?, ?, ?>> configuredAspectFactoryClass) {
+        String name, Class<? extends ConfiguredNativeAspectFactory> configuredAspectFactoryClass) {
       aspectFactoryMap.put(name, configuredAspectFactoryClass);
 
       return this;
@@ -158,6 +162,12 @@ public class ConfiguredRuleClassProvider implements RuleClassProvider {
 
     public Builder setConfigurationCollectionFactory(ConfigurationCollectionFactory factory) {
       this.configurationCollectionFactory = factory;
+      return this;
+    }
+
+    public Builder setUniversalConfigurationFragment(
+        Class<? extends BuildConfiguration.Fragment> fragment) {
+      this.universalFragment = fragment;
       return this;
     }
 
@@ -226,7 +236,7 @@ public class ConfiguredRuleClassProvider implements RuleClassProvider {
       }
 
       return new ConfiguredRuleClassProvider(
-          preludePath,
+          preludeLabel,
           runfilesPrefix,
           ImmutableMap.copyOf(ruleClassMap),
           ImmutableMap.copyOf(ruleDefinitionMap),
@@ -236,6 +246,7 @@ public class ConfiguredRuleClassProvider implements RuleClassProvider {
           ImmutableList.copyOf(configurationOptions),
           ImmutableList.copyOf(configurationFragments),
           configurationCollectionFactory,
+          universalFragment,
           prerequisiteValidator,
           skylarkAccessibleJavaClasses);
     }
@@ -257,7 +268,7 @@ public class ConfiguredRuleClassProvider implements RuleClassProvider {
       try {
         return Label.parseAbsolute(from);
       } catch (LabelSyntaxException e) {
-        throw new IllegalArgumentException(from);
+        throw new IllegalArgumentException(from, e);
       }
     }
   });
@@ -269,9 +280,9 @@ public class ConfiguredRuleClassProvider implements RuleClassProvider {
   String defaultWorkspaceFile;
 
   /**
-   * Workspace-relative path to the prelude.
+   * Label for the prelude file.
    */
-  private final PathFragment preludePath;
+  private final Label preludeLabel;
 
   /**
    * The default runfiles prefix.
@@ -291,7 +302,7 @@ public class ConfiguredRuleClassProvider implements RuleClassProvider {
   /**
    * Maps aspect name to the aspect factory meta class.
    */
-  private final ImmutableMap<String, Class<? extends AspectFactory<?, ?, ?>>> aspectFactoryMap;
+  private final ImmutableMap<String, Class<? extends NativeAspectFactory>> aspectFactoryMap;
 
   /**
    * The configuration options that affect the behavior of the rules.
@@ -308,6 +319,12 @@ public class ConfiguredRuleClassProvider implements RuleClassProvider {
    */
   private final ConfigurationCollectionFactory configurationCollectionFactory;
 
+  /**
+   * A configuration fragment that should be available to all rules even when they don't
+   * explicitly require it.
+   */
+  private final Class<? extends BuildConfiguration.Fragment> universalFragment;
+
   private final ImmutableList<BuildInfoFactory> buildInfoFactories;
 
   private final PrerequisiteValidator prerequisiteValidator;
@@ -315,19 +332,20 @@ public class ConfiguredRuleClassProvider implements RuleClassProvider {
   private final Environment.Frame globals;
 
   public ConfiguredRuleClassProvider(
-      PathFragment preludePath,
+      Label preludeLabel,
       String runfilesPrefix,
       ImmutableMap<String, RuleClass> ruleClassMap,
       ImmutableMap<String, Class<? extends RuleDefinition>> ruleDefinitionMap,
-      ImmutableMap<String, Class<? extends AspectFactory<?, ?, ?>>> aspectFactoryMap,
+      ImmutableMap<String, Class<? extends NativeAspectFactory>> aspectFactoryMap,
       String defaultWorkspaceFile,
       ImmutableList<BuildInfoFactory> buildInfoFactories,
       ImmutableList<Class<? extends FragmentOptions>> configurationOptions,
       ImmutableList<ConfigurationFragmentFactory> configurationFragments,
       ConfigurationCollectionFactory configurationCollectionFactory,
+      Class<? extends BuildConfiguration.Fragment> universalFragment,
       PrerequisiteValidator prerequisiteValidator,
       ImmutableMap<String, SkylarkType> skylarkAccessibleJavaClasses) {
-    this.preludePath = preludePath;
+    this.preludeLabel = preludeLabel;
     this.runfilesPrefix = runfilesPrefix;
     this.ruleClassMap = ruleClassMap;
     this.ruleDefinitionMap = ruleDefinitionMap;
@@ -337,6 +355,7 @@ public class ConfiguredRuleClassProvider implements RuleClassProvider {
     this.configurationOptions = configurationOptions;
     this.configurationFragments = configurationFragments;
     this.configurationCollectionFactory = configurationCollectionFactory;
+    this.universalFragment = universalFragment;
     this.prerequisiteValidator = prerequisiteValidator;
     this.globals = createGlobals(skylarkAccessibleJavaClasses);
   }
@@ -346,8 +365,8 @@ public class ConfiguredRuleClassProvider implements RuleClassProvider {
   }
 
   @Override
-  public PathFragment getPreludePath() {
-    return preludePath;
+  public Label getPreludeLabel() {
+    return preludeLabel;
   }
 
   @Override
@@ -361,7 +380,7 @@ public class ConfiguredRuleClassProvider implements RuleClassProvider {
   }
 
   @Override
-  public Map<String, Class<? extends AspectFactory<?, ?, ?>>> getAspectFactoryMap() {
+  public Map<String, Class<? extends NativeAspectFactory>> getAspectFactoryMap() {
     return aspectFactoryMap;
   }
 
@@ -398,6 +417,14 @@ public class ConfiguredRuleClassProvider implements RuleClassProvider {
    */
   public ConfigurationCollectionFactory getConfigurationCollectionFactory() {
     return configurationCollectionFactory;
+  }
+
+  /**
+   * Returns the configuration fragment that should be available to all rules even when they
+   * don't explicitly require it.
+   */
+  public Class<? extends BuildConfiguration.Fragment> getUniversalFragment() {
+    return universalFragment;
   }
 
   /**

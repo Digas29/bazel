@@ -1,5 +1,3 @@
-android_local_tools_repository(name = "default_android_tools", path = __embedded_dir__ + "/embedded_tools")
-
 # bind(name = "android/proguard_whitelister", actual = "//tools/android:proguard_whitelister")
 # bind(name = "android/merge_manifests", actual = "//tools/android:merge_manifests")
 # bind(name = "android/build_incremental_dexmanifest", actual = "//tools/android:build_incremental_dexmanifest")
@@ -14,6 +12,6 @@ android_local_tools_repository(name = "default_android_tools", path = __embedded
 # bind(name = "android/shuffle_jars", actual = "//tools/android:shuffle_jars")
 # bind(name = "android/merge_dexzips", actual = "//tools/android:merge_dexzips")
 bind(name = "android/sdk")
-bind(name = "android/crosstool", actual = "//tools/cpp:toolchain")
+bind(name = "android/crosstool", actual = "@bazel_tools//tools/cpp:toolchain")
 bind(name = "android/appcompat_v4")
 bind(name = "android/appcompat_v7")

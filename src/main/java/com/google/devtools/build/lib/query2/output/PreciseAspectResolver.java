@@ -20,9 +20,8 @@ import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.events.EventHandler;
-import com.google.devtools.build.lib.packages.AspectClass;
+import com.google.devtools.build.lib.packages.Aspect;
 import com.google.devtools.build.lib.packages.AspectDefinition;
-import com.google.devtools.build.lib.packages.AspectFactory;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
 import com.google.devtools.build.lib.packages.NoSuchThingException;
@@ -95,12 +94,9 @@ public class PreciseAspectResolver implements AspectResolver {
               .getTransitions(
                   new BinaryPredicate<Rule, Attribute>() {
                     @Override
-                    public boolean apply(@Nullable Rule rule, @Nullable Attribute attribute) {
-                      for (AspectClass aspectClass : attribute.getAspects()) {
-                        if (!AspectFactory.Util.create(aspectClass)
-                            .getDefinition()
-                            .getAttributes()
-                            .isEmpty()) {
+                    public boolean apply(@Nullable Rule rule, Attribute attribute) {
+                      for (Aspect aspectWithParameters : attribute.getAspects(rule)) {
+                        if (!aspectWithParameters.getDefinition().getAttributes().isEmpty()) {
                           return true;
                         }
                       }

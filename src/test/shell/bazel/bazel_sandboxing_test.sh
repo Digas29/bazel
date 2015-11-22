@@ -23,6 +23,15 @@ source ${src_dir}/test-setup.sh \
   || { echo "test-setup.sh not found!" >&2; exit 1; }
 source ${src_dir}/bazel_sandboxing_test_utils.sh \
   || { echo "bazel_sandboxing_test_utils.sh not found!" >&2; exit 1; }
+source ${src_dir}/remote_helpers.sh \
+  || { echo "remote_helpers.sh not found!" >&2; exit 1; }
+
+cat >>$TEST_TMPDIR/bazelrc <<'EOF'
+# Testing the sandboxed strategy requires using the sandboxed strategy. While it is the default,
+# we want to make sure that this explicitly fails when the strategy is not available on the system
+# running the test.
+build --spawn_strategy=sandboxed --genrule_strategy=sandboxed
+EOF
 
 function set_up {
   mkdir -p examples/genrule
@@ -42,6 +51,8 @@ EOF
   echo OK > examples/genrule/symlinks/ok/x.txt
   ln -s $PWD/examples/genrule/symlinks/ok/sub examples/genrule/symlinks/a/b
   ln -s ../x.txt examples/genrule/symlinks/a/b/x.txt
+
+  echo 'stuff to serve' > file_to_serve
 
   cat << 'EOF' > examples/genrule/BUILD
 genrule(
@@ -96,6 +107,29 @@ genrule(
 )
 
 genrule(
+  name = "breaks1_works_with_local_tag",
+  srcs = [ "a.txt" ],
+  outs = [ "breaks1_works_with_local_tag.txt" ],
+  cmd = "wc $(location :a.txt) `dirname $(location :a.txt)`/b.txt > $@",
+  tags = [ "local" ],
+)
+
+load('/examples/genrule/skylark', 'skylark_breaks1')
+
+skylark_breaks1(
+  name = "skylark_breaks1",
+  input = "a.txt",
+  output = "skylark_breaks1.txt",
+)
+
+skylark_breaks1(
+  name = "skylark_breaks1_works_with_local_tag",
+  input = "a.txt",
+  output = "skylark_breaks1_works_with_local_tag.txt",
+  action_tags = [ "local" ],
+)
+
+genrule(
   name = "breaks2",
   srcs = [ "a.txt" ],
   outs = [ "breaks2.txt" ],
@@ -127,10 +161,31 @@ cp $(dirname $0)/tool.runfiles/examples/genrule/datafile $1
 echo "Tools work!"
 EOF
   chmod +x examples/genrule/tool.sh
+  cat << 'EOF' >> examples/genrule/skylark.bzl
+def _skylark_breaks1_impl(ctx):
+  print(ctx.outputs.output.path)
+  ctx.action(
+    inputs = [ ctx.file.input ],
+    outputs = [ ctx.outputs.output ],
+    command = "wc %s `dirname %s`/b.txt > %s" % (ctx.file.input.path,
+                                                 ctx.file.input.path,
+                                                 ctx.outputs.output.path),
+    execution_requirements = { tag: '' for tag in ctx.attr.action_tags },
+  )
+
+skylark_breaks1 = rule(
+  _skylark_breaks1_impl,
+  attrs = {
+    "input": attr.label(mandatory=True, allow_files=True, single_file=True),
+    "output": attr.output(mandatory=True),
+    "action_tags": attr.string_list(),
+  },
+)
+EOF
 }
 
 function test_sandboxed_genrule() {
-  bazel build --genrule_strategy=sandboxed \
+  bazel build \
     examples/genrule:works \
     || fail "Hermetic genrule failed: examples/genrule:works"
   [ -f "${BAZEL_GENFILES_DIR}/examples/genrule/works.txt" ] \
@@ -138,7 +193,7 @@ function test_sandboxed_genrule() {
 }
 
 function test_sandboxed_tooldir() {
-  bazel build --genrule_strategy=sandboxed \
+  bazel build \
     examples/genrule:tooldir \
     || fail "Hermetic genrule failed: examples/genrule:tooldir"
   [ -f "${BAZEL_GENFILES_DIR}/examples/genrule/tooldir.txt" ] \
@@ -148,7 +203,7 @@ function test_sandboxed_tooldir() {
 }
 
 function test_sandboxed_genrule_with_tools() {
-  bazel build --genrule_strategy=sandboxed \
+  bazel build \
     examples/genrule:tools_work \
     || fail "Hermetic genrule failed: examples/genrule:tools_work"
   [ -f "${BAZEL_GENFILES_DIR}/examples/genrule/tools.txt" ] \
@@ -165,7 +220,7 @@ function test_sandboxed_genrule_with_tools() {
 # examples/genrule/symlinks/a/x.txt, which is wrong.
 #
 function test_sandbox_relative_symlink_in_inputs() {
-  bazel build --genrule_strategy=sandboxed \
+  bazel build \
     examples/genrule:relative_symlinks \
     || fail "Hermetic genrule failed: examples/genrule:relative_symlinks"
   [ -f "${BAZEL_GENFILES_DIR}/examples/genrule/relative_symlinks.txt" ] \
@@ -173,7 +228,7 @@ function test_sandbox_relative_symlink_in_inputs() {
 }
 
 function test_sandbox_undeclared_deps() {
-  bazel build --genrule_strategy=sandboxed \
+  bazel build \
     examples/genrule:breaks1 \
     && fail "Non-hermetic genrule succeeded: examples/genrule:breaks1" || true
   [ ! -f "${BAZEL_GENFILES_DIR}/examples/genrule/breaks1.txt" ] || {
@@ -183,15 +238,41 @@ function test_sandbox_undeclared_deps() {
 }
 
 function test_sandbox_undeclared_deps_with_local() {
-  bazel build --genrule_strategy=sandboxed \
+  bazel build \
     examples/genrule:breaks1_works_with_local \
     || fail "Non-hermetic genrule failed even though local=1: examples/genrule:breaks1_works_with_local"
   [ -f "${BAZEL_GENFILES_DIR}/examples/genrule/breaks1_works_with_local.txt" ] \
     || fail "Genrule didn't produce output: examples/genrule:breaks1_works_with_local"
 }
 
+function test_sandbox_undeclared_deps_with_local_tag() {
+  bazel build \
+    examples/genrule:breaks1_works_with_local_tag \
+    || fail "Non-hermetic genrule failed even though tags=['local']: examples/genrule:breaks1_works_with_local_tag"
+  [ -f "${BAZEL_GENFILES_DIR}/examples/genrule/breaks1_works_with_local_tag.txt" ] \
+    || fail "Genrule didn't produce output: examples/genrule:breaks1_works_with_local_tag"
+}
+
+function test_sandbox_undeclared_deps_skylark() {
+  bazel build \
+    examples/genrule:skylark_breaks1 \
+    && fail "Non-hermetic genrule succeeded: examples/genrule:skylark_breaks1" || true
+  [ ! -f "${BAZEL_BIN_DIR}/examples/genrule/skylark_breaks1.txt" ] || {
+    output=$(cat "${BAZEL_BIN_DIR}/examples/genrule/skylark_breaks1.txt")
+    fail "Non-hermetic genrule skylark_breaks1 suceeded with following output: $(output)"
+  }
+}
+
+function test_sandbox_undeclared_deps_skylark_with_local_tag() {
+  bazel build \
+    examples/genrule:skylark_breaks1_works_with_local_tag \
+    || fail "Non-hermetic genrule failed even though tags=['local']: examples/genrule:skylark_breaks1_works_with_local_tag"
+  [ -f "${BAZEL_BIN_DIR}/examples/genrule/skylark_breaks1_works_with_local_tag.txt" ] \
+    || fail "Action didn't produce output: examples/genrule:skylark_breaks1_works_with_local_tag"
+}
+
 function test_sandbox_block_filesystem() {
-  bazel build --genrule_strategy=sandboxed \
+  bazel build \
     examples/genrule:breaks2 \
     && fail "Non-hermetic genrule succeeded: examples/genrule:breaks2" || true
   [ ! -f "${BAZEL_GENFILES_DIR}/examples/genrule/breaks2.txt" ] || {
@@ -201,13 +282,71 @@ function test_sandbox_block_filesystem() {
 }
 
 function test_sandbox_cyclic_symlink_in_inputs() {
-  bazel build --genrule_strategy=sandboxed \
+  bazel build \
     examples/genrule:breaks3 \
     && fail "Genrule with cyclic symlinks succeeded: examples/genrule:breaks3" || true
   [ ! -f "${BAZEL_GENFILES_DIR}/examples/genrule/breaks3.txt" ] || {
     output=$(cat "${BAZEL_GENFILES_DIR}/examples/genrule/breaks3.txt")
     fail "Genrule with cyclic symlinks breaks3 suceeded with following output: $(output)"
   }
+}
+
+function test_sandbox_network_access() {
+  serve_file file_to_serve
+  cat << EOF >> examples/genrule/BUILD
+
+genrule(
+  name = "breaks4",
+  outs = [ "breaks4.txt" ],
+  cmd = "curl -o \$@ localhost:${nc_port}",
+)
+EOF
+  bazel build \
+    examples/genrule:breaks1 \
+    && fail "Non-hermetic genrule succeeded: examples/genrule:breaks4" || true
+  [ ! -f "${BAZEL_GENFILES_DIR}/examples/genrule/breaks4.txt" ] || {
+    output=$(cat "${BAZEL_GENFILES_DIR}/examples/genrule/breaks4.txt")
+    fail "Non-hermetic genrule breaks1 suceeded with following output: $(output)"
+  }
+  kill_nc
+}
+
+function test_sandbox_network_access_with_local() {
+  serve_file file_to_serve
+  cat << EOF >> examples/genrule/BUILD
+
+genrule(
+  name = "breaks4_works_with_local",
+  outs = [ "breaks4_works_with_local.txt" ],
+  cmd = "curl -o \$@ localhost:${nc_port}",
+  tags = [ "local" ],
+)
+EOF
+  bazel build \
+    examples/genrule:breaks4_works_with_local \
+    || fail "Non-hermetic genrule failed even though tags=['local']: examples/genrule:breaks4_works_with_local"
+  [ -f "${BAZEL_GENFILES_DIR}/examples/genrule/breaks4_works_with_local.txt" ] \
+    || fail "Genrule didn't produce output: examples/genrule:breaks4_works_with_local"
+  kill_nc
+}
+
+function test_sandbox_network_access_with_requires_network() {
+  serve_file file_to_serve
+  cat << EOF >> examples/genrule/BUILD
+
+genrule(
+  name = "breaks4_works_with_requires_network",
+  outs = [ "breaks4_works_with_requires_network.txt" ],
+  cmd = "curl -o \$@ localhost:${nc_port}",
+  tags = [ "requires-network" ],
+)
+EOF
+  bazel build \
+    examples/genrule:breaks4_works_with_requires_network \
+    || fail "Non-hermetic genrule failed even though tags=['requires-network']: examples/genrule:breaks4_works_with_requires_network"
+  [ -f "${BAZEL_GENFILES_DIR}/examples/genrule/breaks4_works_with_requires_network.txt" ] \
+    || fail "Genrule didn't produce output: examples/genrule:breaks4_works_with_requires_network"
+  kill_nc
 }
 
 check_kernel_version

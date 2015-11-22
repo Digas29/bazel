@@ -32,6 +32,7 @@ import com.google.devtools.common.options.OptionsParsingException;
 
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -149,6 +150,13 @@ public final class BuildOptions implements Cloneable, Serializable {
   }
 
   /**
+   * Returns true if these options contain the given {@link FragmentOptions}.
+   */
+  public boolean contains(Class<? extends FragmentOptions> optionsClass) {
+    return fragmentOptionsMap.containsKey(optionsClass);
+  }
+
+  /**
    * Returns a multimap of all labels that were specified as options, keyed by the name to be
    * displayed to the user if something goes wrong. This should be the set of all labels
    * mentioned in explicit command line options that are not already covered by the
@@ -219,7 +227,7 @@ public final class BuildOptions implements Cloneable, Serializable {
   /**
    * Returns the options contained in this collection.
    */
-  public Iterable<FragmentOptions> getOptions() {
+  public Collection<FragmentOptions> getOptions() {
     return fragmentOptionsMap.values();
   }
 

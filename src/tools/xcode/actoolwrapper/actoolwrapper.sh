@@ -21,7 +21,12 @@
 
 set -eu
 
-OUTZIP=$(tools/objc/realpath "$1")
+REALPATH="$0.runfiles/external/bazel_tools/tools/objc/realpath"
+if [ ! -e $REALPATH ]; then
+  REALPATH=tools/objc/realpath
+fi
+
+OUTZIP=$($REALPATH "$1")
 shift 1
 TEMPDIR=$(mktemp -d -t actoolZippingOutput)
 trap "rm -rf \"$TEMPDIR\"" EXIT
@@ -41,13 +46,18 @@ for i in $@; do
     touch "$i"
   fi
   if [ -e "$i" ]; then
-    ARG=$(tools/objc/realpath "$i")
+    ARG=$($REALPATH "$i")
     TOOLARGS+=("$ARG")
   else
     TOOLARGS+=("$i")
   fi
   LASTARG="$i"
 done
+
+WRAPPER="$0.runfiles/external/bazel_tools/tools/objc/xcrunwrapper.sh"
+if [ ! -e $WRAPPER ]; then
+  WRAPPER=tools/objc/xcrunwrapper.sh
+fi
 
 # If we are running into problems figuring out actool issues, there are a couple
 # of env variables that may help. Both of the following must be set to work.
@@ -58,7 +68,7 @@ done
 # helps.
 # Yes IBTOOL appears to be correct here due to actool and ibtool being based
 # on the same codebase.
-/usr/bin/xcrun actool --errors --warnings --notices \
+$WRAPPER actool --errors --warnings --notices \
     --compress-pngs --output-format human-readable-text \
     --compile "$TEMPDIR" "${TOOLARGS[@]}"
 
@@ -71,5 +81,5 @@ find . -exec touch -h -t 198001010000 {} \;
 
 # Added include "*" to fix case where we may want an empty zip file because
 # there is no data.
-zip --symlinks --recurse-paths --quiet "$OUTZIP" . --include "*"
+zip --compression-method store --symlinks --recurse-paths --quiet "$OUTZIP" . --include "*"
 popd > /dev/null

@@ -20,11 +20,11 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.packages.NativeAspectClass.NativeAspectFactory;
 import com.google.devtools.build.lib.syntax.ClassObject;
 import com.google.devtools.build.lib.syntax.ClassObject.SkylarkClassObject;
 import com.google.devtools.build.lib.syntax.EvalException;
@@ -36,6 +36,7 @@ import com.google.devtools.build.lib.util.FileType;
 import com.google.devtools.build.lib.util.FileTypeSet;
 import com.google.devtools.build.lib.util.StringUtil;
 
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -207,6 +208,13 @@ public final class Attribute implements Comparable<Attribute> {
      * (for visibility, etc.).
      */
     SKIP_PREREQ_VALIDATOR_CHECKS,
+
+    /**
+     * Whether we should check constraints on dependencies under this attribute
+     * (see {@link com.google.devtools.build.lib.analysis.constraints.ConstraintSemantics}). If set,
+     * the attribute is constraint-enforced even if default enforcement policy would skip it.
+     */
+    CHECK_CONSTRAINTS,
   }
 
   // TODO(bazel-team): modify this interface to extend Predicate and have an extra error
@@ -245,10 +253,15 @@ public final class Attribute implements Comparable<Attribute> {
 
     private final Set<Object> allowedValues;
 
+    public <T> AllowedValueSet(T... values) {
+      this(Arrays.asList(values));
+    }
+
     public AllowedValueSet(Iterable<?> values) {
       Preconditions.checkNotNull(values);
       Preconditions.checkArgument(!Iterables.isEmpty(values));
-      allowedValues = ImmutableSet.copyOf(values);
+      // Do not remove <Object>: workaround for Java 7 type inference.
+      allowedValues = ImmutableSet.<Object>copyOf(values);
     }
 
     @Override
@@ -536,6 +549,19 @@ public final class Attribute implements Comparable<Attribute> {
     }
 
     /**
+     * Enforces constraint checking on dependencies under this attribute. Not calling this method
+     * does <i>not</i> mean the attribute won't be enforced. This method simply overrides default
+     * enforcement policy, so it's useful for special-case attributes that would otherwise be
+     * skipped.
+     *
+     * <p>See {@link com.google.devtools.build.lib.analysis.constraints.ConstraintSemantics#getConstraintCheckedDependencies}
+     * for default enforcement policy.
+     */
+    public Builder<TYPE> checkConstraints() {
+      return setPropertyFlag(PropertyFlag.CHECK_CONSTRAINTS, "check_constraints");
+    }
+
+    /**
      * If this is a label or label-list attribute, then this sets the allowed
      * rule types for the labels occurring in the attribute. If the attribute
      * contains Labels of any other rule type, then an error is produced during
@@ -681,7 +707,7 @@ public final class Attribute implements Comparable<Attribute> {
      * Asserts that a particular aspect probably needs to be computed for all direct dependencies
      * through this attribute.
      */
-    public Builder<TYPE> aspect(Class<? extends AspectFactory<?, ?, ?>> aspect) {
+    public <T extends NativeAspectFactory> Builder<TYPE> aspect(Class<T> aspect) {
       Function<Rule, AspectParameters> noParameters = new Function<Rule, AspectParameters>() {
         @Override
         public AspectParameters apply(Rule input) {
@@ -697,9 +723,9 @@ public final class Attribute implements Comparable<Attribute> {
      *
      * @param evaluator function that extracts aspect parameters from rule.
      */
-    public Builder<TYPE> aspect(Class<? extends AspectFactory<?, ?, ?>> aspect,
-        Function<Rule, AspectParameters> evaluator) {
-      this.aspects.add(new RuleAspect(new NativeAspectClass(aspect), evaluator));
+    public <T extends NativeAspectFactory> Builder<TYPE> aspect(
+        Class<T> aspect, Function<Rule, AspectParameters> evaluator) {
+      this.aspects.add(new RuleAspect(new NativeAspectClass<T>(aspect), evaluator));
       return this;
     }
 
@@ -1257,6 +1283,10 @@ public final class Attribute implements Comparable<Attribute> {
     return !getPropertyFlag(PropertyFlag.SKIP_PREREQ_VALIDATOR_CHECKS);
   }
 
+  public boolean checkConstraintsOverride() {
+    return getPropertyFlag(PropertyFlag.CHECK_CONSTRAINTS);
+  }
+
   /**
    * Returns true if this attribute's value can be influenced by the build configuration.
    */
@@ -1308,23 +1338,13 @@ public final class Attribute implements Comparable<Attribute> {
   }
 
   /**
-   * Returns the set of aspects required for dependencies through this attribute.
+   * Returns the list of aspects required for dependencies through this attribute.
    */
-  public ImmutableSet<AspectClass> getAspects() {
-    ImmutableSet.Builder<AspectClass> builder = ImmutableSet.builder();
+  public ImmutableList<Aspect> getAspects(Rule rule) {
+    ImmutableList.Builder<Aspect> builder = ImmutableList.builder();
     for (RuleAspect aspect : aspects) {
-      builder.add(aspect.getAspectFactory());
-    }
-    return builder.build();
-  }
-
-  /**
-   * Returns set of pairs of aspect factories and corresponding aspect parameters.
-   */
-  public ImmutableMap<AspectClass, AspectParameters> getAspectsWithParameters(Rule rule) {
-    ImmutableMap.Builder<AspectClass, AspectParameters> builder = ImmutableMap.builder();
-    for (RuleAspect aspect : aspects) {
-      builder.put(aspect.getAspectFactory(), aspect.getParametersExtractor().apply(rule));
+      builder.add(
+          new Aspect(aspect.getAspectFactory(), aspect.getParametersExtractor().apply(rule)));
     }
     return builder.build();
   }

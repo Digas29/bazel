@@ -32,6 +32,7 @@ import com.google.devtools.build.lib.analysis.actions.TemplateExpansionAction;
 import com.google.devtools.build.lib.analysis.actions.TemplateExpansionAction.Substitution;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
+import com.google.devtools.build.lib.rules.apple.AppleConfiguration;
 import com.google.devtools.build.lib.rules.test.TestEnvironmentProvider;
 import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.FileType;
@@ -74,6 +75,8 @@ public class TestSupport {
     String runMemleaks =
         ruleContext.getFragment(ObjcConfiguration.class).runMemleaks() ? "true" : "false";
 
+    Map<String, String> testEnv = ruleContext.getConfiguration().getTestEnv();
+    
     // The substitutions below are common for simulator and lab device.
     ImmutableList.Builder<Substitution> substitutions =
         new ImmutableList.Builder<Substitution>()
@@ -82,7 +85,9 @@ public class TestSupport {
             .add(Substitution.of("%(test_app_name)s", baseNameWithoutIpa(testIpa)))
             .add(
                 Substitution.of("%(plugin_jars)s", Artifact.joinRootRelativePaths(":", plugins())));
-
+    
+    substitutions.add(Substitution.ofSpaceSeparatedMap("%(test_env)s", testEnv));
+        
     // xctestIpa is the app bundle being tested
     Optional<Artifact> xctestIpa = xctestIpa();
     if (xctestIpa.isPresent()) {
@@ -226,20 +231,19 @@ public class TestSupport {
    * builder.
    */
   public Map<Class<? extends TransitiveInfoProvider>, TransitiveInfoProvider> getExtraProviders() {
-    if (ruleContext.getConfiguration().isCodeCoverageEnabled()) {
-      return ImmutableMap.<Class<? extends TransitiveInfoProvider>, TransitiveInfoProvider>of(
-          TestEnvironmentProvider.class, new TestEnvironmentProvider(gcovEnv()));
-    }
-    return ImmutableMap.of();
-  }
+    AppleConfiguration configuration = ruleContext.getFragment(AppleConfiguration.class);
 
-  /**
-   * Returns a map of extra environment variable names to their values used to point to gcov binary,
-   * which should be added to the test action environment, if coverage is enabled.
-   */
-  private ImmutableMap<String, String> gcovEnv() {
-    return ImmutableMap.of(
-        "COVERAGE_GCOV_PATH", ruleContext.getHostPrerequisiteArtifact(":gcov").getExecPathString());
+    ImmutableMap.Builder<String, String> envBuilder = ImmutableMap.builder();
+
+    envBuilder.putAll(configuration.getEnvironmentForIosAction());
+
+    if (ruleContext.getConfiguration().isCodeCoverageEnabled()) {
+      envBuilder.put("COVERAGE_GCOV_PATH",
+          ruleContext.getHostPrerequisiteArtifact(":gcov").getExecPathString());
+    }
+
+    return ImmutableMap.<Class<? extends TransitiveInfoProvider>, TransitiveInfoProvider>of(
+        TestEnvironmentProvider.class, new TestEnvironmentProvider(envBuilder.build()));
   }
 
   /**

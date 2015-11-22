@@ -31,6 +31,9 @@ import com.google.devtools.build.lib.analysis.actions.CommandLine;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
+import com.google.devtools.build.lib.rules.apple.AppleConfiguration;
+import com.google.devtools.build.lib.rules.apple.AppleToolchain;
+import com.google.devtools.build.lib.rules.apple.Platform;
 import com.google.devtools.build.lib.rules.objc.TargetDeviceFamily.InvalidFamilyNameException;
 import com.google.devtools.build.lib.rules.objc.TargetDeviceFamily.RepeatedFamilyNameException;
 import com.google.devtools.build.lib.rules.objc.XcodeProvider.Builder;
@@ -127,16 +130,16 @@ final class BundleSupport {
   }
 
   private void validatePlatform() {
-    ObjcConfiguration objcConfiguration = ObjcRuleClasses.objcConfiguration(ruleContext);
+    AppleConfiguration appleConfiguration = ruleContext.getFragment(AppleConfiguration.class);
     Platform platform = null;
-    for (String architecture : objcConfiguration.getIosMultiCpus()) {
+    for (String architecture : appleConfiguration.getIosMultiCpus()) {
       if (platform == null) {
-        platform = Platform.forArch(architecture);
-      } else if (platform != Platform.forArch(architecture)) {
+        platform = Platform.forIosArch(architecture);
+      } else if (platform != Platform.forIosArch(architecture)) {
         ruleContext.ruleError(
             String.format("In builds which require bundling, --ios_multi_cpus does not currently "
                 + "allow values for both simulator and device builds. Flag was %s",
-            objcConfiguration.getIosMultiCpus()));
+                appleConfiguration.getIosMultiCpus()));
       }
     }
   }
@@ -229,21 +232,25 @@ final class BundleSupport {
               .setCommandLine(ibActionsCommandLine(archiveRoot, zipOutput, storyboardInput))
               .addOutput(zipOutput)
               .addInput(storyboardInput)
-              // TODO(dmaclach): Adding realpath here should not be required once
+              // TODO(dmaclach): Adding realpath and xcrunwrapper should not be required once
               // https://github.com/bazelbuild/bazel/issues/285 is fixed.
               .addInput(attributes.realpath())
+              .addInput(CompilationSupport.xcrunwrapper(ruleContext).getExecutable())
               .build(ruleContext));
     }
   }
 
   private CommandLine ibActionsCommandLine(String archiveRoot, Artifact zipOutput,
       Artifact storyboardInput) {
-    CustomCommandLine.Builder commandLine = CustomCommandLine.builder()
-        // The next three arguments are positional, i.e. they don't have flags before them.
-        .addPath(zipOutput.getExecPath())
-        .add(archiveRoot)
-        .add("--minimum-deployment-target").add(bundling.getMinimumOsVersion())
-        .add("--module").add(ruleContext.getLabel().getName());
+    CustomCommandLine.Builder commandLine =
+        CustomCommandLine.builder()
+            // The next three arguments are positional, i.e. they don't have flags before them.
+            .addPath(zipOutput.getExecPath())
+            .add(archiveRoot)
+            .add("--minimum-deployment-target")
+            .add(bundling.getMinimumOsVersion().toString())
+            .add("--module")
+            .add(ruleContext.getLabel().getName());
 
     for (TargetDeviceFamily targetDeviceFamily : attributes.families()) {
       commandLine.add("--target-device").add(targetDeviceFamily.name().toLowerCase(Locale.US));
@@ -255,7 +262,7 @@ final class BundleSupport {
   }
 
   private void registerMomczipActions(ObjcProvider objcProvider) {
-    ObjcConfiguration objcConfiguration = ObjcRuleClasses.objcConfiguration(ruleContext);
+    AppleConfiguration appleConfiguration = ruleContext.getFragment(AppleConfiguration.class);
     IntermediateArtifacts intermediateArtifacts =
         ObjcRuleClasses.intermediateArtifacts(ruleContext);
     Iterable<Xcdatamodel> xcdatamodels = Xcdatamodels.xcdatamodels(
@@ -268,16 +275,17 @@ final class BundleSupport {
               .setExecutable(attributes.momcWrapper())
               .addOutput(outputZip)
               .addInputs(datamodel.getInputs())
-              // TODO(dmaclach): Adding realpath here should not be required once
+              // TODO(dmaclach): Adding realpath and xcrunwrapper should not be required once
               // https://github.com/google/bazel/issues/285 is fixed.
               .addInput(attributes.realpath())
-              .setCommandLine(CustomCommandLine.builder()
+              .addInput(CompilationSupport.xcrunwrapper(ruleContext).getExecutable())
+             .setCommandLine(CustomCommandLine.builder()
                   .addPath(outputZip.getExecPath())
                   .add(datamodel.archiveRootForMomczip())
-                  .add("-XD_MOMC_SDKROOT=" + IosSdkCommands.sdkDir(objcConfiguration))
+                  .add("-XD_MOMC_SDKROOT=" + AppleToolchain.sdkDir())
                   .add("-XD_MOMC_IOS_TARGET_VERSION=" + bundling.getMinimumOsVersion())
                   .add("-MOMC_PLATFORMS")
-                  .add(objcConfiguration.getBundlingPlatform().getLowerCaseNameInPlist())
+                  .add(appleConfiguration.getBundlingPlatform().getLowerCaseNameInPlist())
                   .add("-XD_MOMC_TARGET_VERSION=10.6")
                   .add(datamodel.getContainer().getSafePathString())
                   .build())
@@ -300,9 +308,10 @@ final class BundleSupport {
               .setCommandLine(ibActionsCommandLine(archiveRoot, zipOutput, original))
               .addOutput(zipOutput)
               .addInput(original)
-              // TODO(dmaclach): Adding realpath here should not be required once
+              // TODO(dmaclach): Adding realpath and xcrunwrapper should not be required once
               // https://github.com/bazelbuild/bazel/issues/285 is fixed.
               .addInput(attributes.realpath())
+              .addInput(CompilationSupport.xcrunwrapper(ruleContext).getExecutable())
               .build(ruleContext));
     }
   }
@@ -312,14 +321,17 @@ final class BundleSupport {
         ObjcRuleClasses.intermediateArtifacts(ruleContext);
     for (Artifact strings : objcProvider.get(ObjcProvider.STRINGS)) {
       Artifact bundled = intermediateArtifacts.convertedStringsFile(strings);
-      ruleContext.registerAction(new SpawnAction.Builder()
+      ruleContext.registerAction(ObjcRuleClasses.spawnOnDarwinActionBuilder(ruleContext)
           .setMnemonic("ConvertStringsPlist")
-          .setExecutable(attributes.plmerge())
+          .setExecutable(new PathFragment("/usr/bin/plutil"))
           .setCommandLine(CustomCommandLine.builder()
-              .addExecPath("--source_file", strings)
-              .addExecPath("--out_file", bundled)
+              .add("-convert").add("binary1")
+              .addExecPath("-o", bundled)
+              .add("--")
+              .addPath(strings.getExecPath())
               .build())
           .addInput(strings)
+          .addInput(CompilationSupport.xcrunwrapper(ruleContext).getExecutable())
           .addOutput(bundled)
           .build(ruleContext));
     }
@@ -381,9 +393,10 @@ final class BundleSupport {
             .addTransitiveInputs(objcProvider.get(ASSET_CATALOG))
             .addOutput(zipOutput)
             .addOutput(actoolPartialInfoplist)
-            // TODO(dmaclach): Adding realpath here should not be required once
+            // TODO(dmaclach): Adding realpath and xcrunwrapper should not be required once
             // https://github.com/google/bazel/issues/285 is fixed.
             .addInput(attributes.realpath())
+            .addInput(CompilationSupport.xcrunwrapper(ruleContext).getExecutable())
             .setCommandLine(actoolzipCommandLine(
                 objcProvider,
                 zipOutput,
@@ -393,13 +406,16 @@ final class BundleSupport {
 
   private CommandLine actoolzipCommandLine(ObjcProvider provider, Artifact zipOutput,
       Artifact partialInfoPlist) {
-    ObjcConfiguration objcConfiguration = ObjcRuleClasses.objcConfiguration(ruleContext);
-    CustomCommandLine.Builder commandLine = CustomCommandLine.builder()
-        // The next three arguments are positional, i.e. they don't have flags before them.
-        .addPath(zipOutput.getExecPath())
-        .add("--platform").add(objcConfiguration.getBundlingPlatform().getLowerCaseNameInPlist())
-        .addExecPath("--output-partial-info-plist", partialInfoPlist)
-        .add("--minimum-deployment-target").add(bundling.getMinimumOsVersion());
+    AppleConfiguration appleConfiguration = ruleContext.getFragment(AppleConfiguration.class);
+    CustomCommandLine.Builder commandLine =
+        CustomCommandLine.builder()
+            // The next three arguments are positional, i.e. they don't have flags before them.
+            .addPath(zipOutput.getExecPath())
+            .add("--platform")
+            .add(appleConfiguration.getBundlingPlatform().getLowerCaseNameInPlist())
+            .addExecPath("--output-partial-info-plist", partialInfoPlist)
+            .add("--minimum-deployment-target")
+            .add(bundling.getMinimumOsVersion().toString());
 
     for (TargetDeviceFamily targetDeviceFamily : attributes.families()) {
       commandLine.add("--target-device").add(targetDeviceFamily.name().toLowerCase(Locale.US));

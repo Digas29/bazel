@@ -248,6 +248,10 @@ public final class Label implements Comparable<Label>, Serializable, SkylarkPrin
   /**
    * Returns the path fragment of the package in which this rule was declared (e.g. {@code
    * //file/base:fileutils_test} returns {@code file/base}).
+   *
+   * <p>This is <b>not</b> suitable for inferring a path under which files related to a rule with
+   * this label will be under the exec root, in particular, it won't work for rules in external
+   * repositories.
    */
   public PathFragment getPackageFragment() {
     return packageIdentifier.getPackageFragment();
@@ -287,6 +291,15 @@ public final class Label implements Comparable<Label>, Serializable, SkylarkPrin
    */
   @Override
   public String toString() {
+    return getCanonicalForm();
+  }
+
+  /**
+   * Renders this label in canonical form.
+   *
+   * <p>invariant: {@code parseAbsolute(x.toString()).equals(x)}
+   */
+  public String getCanonicalForm() {
     return packageIdentifier.getRepository() + "//" + packageIdentifier.getPackageFragment()
         + ":" + name;
   }

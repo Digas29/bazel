@@ -28,6 +28,7 @@ import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.packages.AttributeMap;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
+import com.google.devtools.build.lib.rules.apple.AppleConfiguration;
 import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.FileType;
 
@@ -48,7 +49,7 @@ public class ObjcProtoLibraryRule implements RuleDefinition {
   @Override
   public RuleClass build(Builder builder, final RuleDefinitionEnvironment env) {
     return builder
-        .requiresConfigurationFragments(ObjcConfiguration.class)
+        .requiresConfigurationFragments(ObjcConfiguration.class, AppleConfiguration.class)
         /* <!-- #BLAZE_RULE(objc_proto_library).ATTRIBUTE(deps) -->
         The directly depended upon proto_library rules.
         ${SYNOPSIS}
@@ -75,7 +76,6 @@ public class ObjcProtoLibraryRule implements RuleDefinition {
         .add(attr(PER_PROTO_INCLUDES, BOOLEAN).value(false))
         /* <!-- #BLAZE_RULE(objc_proto_library).ATTRIBUTE(per_proto_includes) -->
         If true, always add all directories to objc_library includes,
-        overriding --noobjc_per_proto_includes.
         ${SYNOPSIS}
         <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
         .add(attr(COMPILE_PROTOS_ATTR, LABEL)
@@ -107,7 +107,7 @@ public class ObjcProtoLibraryRule implements RuleDefinition {
     return RuleDefinition.Metadata.builder()
         .name("objc_proto_library")
         .factoryClass(ObjcProtoLibrary.class)
-        .ancestors(BaseRuleClasses.RuleBase.class)
+        .ancestors(BaseRuleClasses.RuleBase.class, ObjcRuleClasses.XcrunRule.class)
         .build();
   }
 }

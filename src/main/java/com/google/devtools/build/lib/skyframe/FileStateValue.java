@@ -58,7 +58,8 @@ public abstract class FileStateValue implements SkyValue {
   public static final NonexistentFileStateValue NONEXISTENT_FILE_STATE_NODE =
       new NonexistentFileStateValue();
 
-  enum Type {
+  /** Type of a path. */
+  public enum Type {
     REGULAR_FILE,
     SPECIAL_FILE,
     DIRECTORY,
@@ -69,7 +70,7 @@ public abstract class FileStateValue implements SkyValue {
   protected FileStateValue() {
   }
 
-  static FileStateValue create(RootedPath rootedPath,
+  public static FileStateValue create(RootedPath rootedPath,
       @Nullable TimestampGranularityMonitor tsgm) throws InconsistentFilesystemException,
       IOException {
     Path path = rootedPath.asPath();
@@ -105,7 +106,7 @@ public abstract class FileStateValue implements SkyValue {
     return new SkyKey(SkyFunctions.FILE_STATE, rootedPath);
   }
 
-  abstract Type getType();
+  public abstract Type getType();
 
   PathFragment getSymlinkTarget() {
     throw new IllegalStateException();
@@ -144,7 +145,7 @@ public abstract class FileStateValue implements SkyValue {
     @Nullable private final byte[] digest;
     @Nullable private final FileContentsProxy contentsProxy;
 
-    private RegularFileStateValue(long size, long mtime, byte[] digest,
+    public RegularFileStateValue(long size, long mtime, byte[] digest,
         FileContentsProxy contentsProxy) {
       Preconditions.checkState((digest == null) != (contentsProxy == null));
       this.size = size;
@@ -193,19 +194,27 @@ public abstract class FileStateValue implements SkyValue {
     }
 
     @Override
-    Type getType() {
+    public Type getType() {
       return Type.REGULAR_FILE;
     }
 
     @Override
-    long getSize() {
+    public long getSize() {
       return size;
+    }
+
+    public long getMtime() {
+      return mtime;
     }
 
     @Override
     @Nullable
-    byte[] getDigest() {
+    public byte[] getDigest() {
       return digest;
+    }
+
+    public FileContentsProxy getContentsProxy() {
+      return contentsProxy;
     }
 
     @Override
@@ -237,7 +246,7 @@ public abstract class FileStateValue implements SkyValue {
   public static final class SpecialFileStateValue extends FileStateValue {
     private final FileContentsProxy contentsProxy;
 
-    private SpecialFileStateValue(FileContentsProxy contentsProxy) {
+    public SpecialFileStateValue(FileContentsProxy contentsProxy) {
       this.contentsProxy = contentsProxy;
     }
 
@@ -253,7 +262,7 @@ public abstract class FileStateValue implements SkyValue {
     }
 
     @Override
-    Type getType() {
+    public Type getType() {
       return Type.SPECIAL_FILE;
     }
 
@@ -266,6 +275,10 @@ public abstract class FileStateValue implements SkyValue {
     @Nullable
     byte[] getDigest() {
       return null;
+    }
+
+    public FileContentsProxy getContentsProxy() {
+      return contentsProxy;
     }
 
     @Override
@@ -295,7 +308,7 @@ public abstract class FileStateValue implements SkyValue {
     }
 
     @Override
-    Type getType() {
+    public Type getType() {
       return Type.DIRECTORY;
     }
 
@@ -321,17 +334,17 @@ public abstract class FileStateValue implements SkyValue {
 
     private final PathFragment symlinkTarget;
 
-    private SymlinkFileStateValue(PathFragment symlinkTarget) {
+    public SymlinkFileStateValue(PathFragment symlinkTarget) {
       this.symlinkTarget = symlinkTarget;
     }
 
     @Override
-    Type getType() {
+    public Type getType() {
       return Type.SYMLINK;
     }
 
     @Override
-    PathFragment getSymlinkTarget() {
+    public PathFragment getSymlinkTarget() {
       return symlinkTarget;
     }
 
@@ -362,7 +375,7 @@ public abstract class FileStateValue implements SkyValue {
     }
 
     @Override
-    Type getType() {
+    public Type getType() {
       return Type.NONEXISTENT;
     }
 

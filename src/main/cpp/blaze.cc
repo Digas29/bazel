@@ -261,8 +261,25 @@ static vector<string> GetArgumentArray() {
 
   vector<string> user_options;
 
-  blaze_util::SplitQuotedStringUsing(globals->options.host_jvm_args, ' ',
-                                     &user_options);
+  if (globals->options.preserve_spaces_in_host_jvm_args) {
+    user_options.insert(user_options.begin(),
+                        globals->options.host_jvm_args.begin(),
+                        globals->options.host_jvm_args.end());
+  } else {
+    for (const auto &arg : globals->options.host_jvm_args) {
+      int num_segments =
+          blaze_util::SplitQuotedStringUsing(arg, ' ', &user_options);
+      if (num_segments > 1) {
+        fprintf(
+            stderr,
+            "WARNING: You are passing multiple jvm options"
+            " under a single --host_jvm_args option: %s. This will stop working"
+            "soon. Instead, pass each option under its own -host_jvm_args "
+            "option.\n",
+            arg.c_str());
+      }
+    }
+  }
 
   // Add JVM arguments particular to building blaze64 and particular JVM
   // versions.
@@ -350,8 +367,13 @@ static vector<string> GetArgumentArray() {
   if (!globals->options.host_jvm_profile.empty()) {
     result.push_back("--host_jvm_profile=" + globals->options.host_jvm_profile);
   }
+  if (globals->options.preserve_spaces_in_host_jvm_args) {
+    result.push_back("--experimental_preserve_spaces_in_host_jvm_args");
+  }
   if (!globals->options.host_jvm_args.empty()) {
-    result.push_back("--host_jvm_args=" + globals->options.host_jvm_args);
+    for (const auto &arg : globals->options.host_jvm_args) {
+      result.push_back("--host_jvm_args=" + arg);
+    }
   }
 
   if (globals->options.invocation_policy != NULL &&
@@ -711,21 +733,31 @@ static int ConnectToServer(bool start) {
   return -1;
 }
 
+// Poll until the given process denoted by pid goes away. Return false if this
+// does not occur within wait_time_secs.
+static bool WaitForServerDeath(pid_t pid, int wait_time_secs) {
+  for (int ii = 0; ii < wait_time_secs * 10; ++ii) {
+    if (kill(pid, 0) == -1) {
+      if (errno == ESRCH) {
+        return true;
+      }
+      pdie(blaze_exit_code::INTERNAL_ERROR, "could not be killed");
+    }
+    poll(NULL, 0, 100);  // sleep 100ms.  (usleep(3) is obsolete.)
+  }
+  return false;
+}
+
 // Kills the specified running Blaze server.
 static void KillRunningServer(pid_t server_pid) {
   if (server_pid == -1) return;
   fprintf(stderr, "Sending SIGTERM to previous %s server (pid=%d)... ",
           globals->options.GetProductName().c_str(), server_pid);
   fflush(stderr);
-  for (int ii = 0; ii < 100; ++ii) {  // wait up to 10s
-    if (kill(server_pid, SIGTERM) == -1) {
-      if (errno == ESRCH) {
-        fprintf(stderr, "done.\n");
-        return;  // Ding! Dong! The witch is dead!
-      }
-      pdie(blaze_exit_code::INTERNAL_ERROR, "could not be killed");
-    }
-    poll(NULL, 0, 100);  // sleep 100ms.  (usleep(3) is obsolete.)
+  kill(server_pid, SIGTERM);
+  if (WaitForServerDeath(server_pid, 10)) {
+    fprintf(stderr, "done.\n");
+    return;
   }
 
   // If the previous attempt did not suceeded, kill the whole group.
@@ -734,20 +766,12 @@ static void KillRunningServer(pid_t server_pid) {
           globals->options.GetProductName().c_str(), server_pid);
   fflush(stderr);
   killpg(server_pid, SIGKILL);
-  for (int ii = 0; ii < 30; ++ii) {  // wait up to 3s
-    if (kill(server_pid, 0) == -1) {  // (probe)
-      if (errno == ESRCH) {
-        // The previous server is gone. This is what we're looking for!
-        fprintf(stderr, "killed.\n");
-        return;
-      }
-      // Unexpected failure from kill().
-      pdie(blaze_exit_code::INTERNAL_ERROR, "could not be killed");
-    }
-    poll(NULL, 0, 100);  // sleep 100ms.  (usleep(3) is obsolete.)
+  if (WaitForServerDeath(server_pid, 10)) {
+    fprintf(stderr, "killed.\n");
+    return;
   }
-  // Process did not go away 3s after SIGKILL. Stuck in state 'Z' or 'D'?
-  pdie(blaze_exit_code::INTERNAL_ERROR, "SIGKILL unsuccessful after 3s");
+  // Process did not go away 10s after SIGKILL. Stuck in state 'Z' or 'D'?
+  pdie(blaze_exit_code::INTERNAL_ERROR, "SIGKILL unsuccessful after 10s");
 }
 
 

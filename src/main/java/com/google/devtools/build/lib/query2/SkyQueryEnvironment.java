@@ -47,9 +47,12 @@ import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
 import com.google.devtools.build.lib.pkgcache.TargetPatternEvaluator;
 import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.query2.engine.AllRdepsFunction;
+import com.google.devtools.build.lib.query2.engine.Callback;
 import com.google.devtools.build.lib.query2.engine.QueryEvalResult;
 import com.google.devtools.build.lib.query2.engine.QueryException;
 import com.google.devtools.build.lib.query2.engine.QueryExpression;
+import com.google.devtools.build.lib.query2.engine.QueryUtil.AbstractUniquifier;
+import com.google.devtools.build.lib.query2.engine.Uniquifier;
 import com.google.devtools.build.lib.skyframe.FileValue;
 import com.google.devtools.build.lib.skyframe.GraphBackedRecursivePackageProvider;
 import com.google.devtools.build.lib.skyframe.PackageLookupValue;
@@ -70,6 +73,7 @@ import com.google.devtools.build.skyframe.WalkableGraph;
 import com.google.devtools.build.skyframe.WalkableGraph.WalkableGraphFactory;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Deque;
 import java.util.HashMap;
@@ -163,14 +167,14 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target> {
   }
 
   @Override
-  public QueryEvalResult<Target> evaluateQuery(QueryExpression expr)
+  public QueryEvalResult evaluateQuery(QueryExpression expr, Callback<Target> callback)
       throws QueryException, InterruptedException {
     // Some errors are reported as QueryExceptions and others as ERROR events (if --keep_going). The
     // result is set to have an error iff there were errors emitted during the query, so we reset
     // errors here.
     eventHandler.resetErrors();
     init();
-    return super.evaluateQuery(expr);
+    return super.evaluateQuery(expr, callback);
   }
 
   private Map<Target, Collection<Target>> makeTargetsMap(Map<SkyKey, Iterable<SkyKey>> input) {
@@ -299,6 +303,26 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target> {
   }
 
   @Override
+  public void eval(QueryExpression expr, Callback<Target> callback)
+      throws QueryException, InterruptedException {
+    // 10k is likely a good balance between using batch efficiently and not blowing up memory.
+    BatchStreamedCallback aggregator = new BatchStreamedCallback(callback, 10000,
+        createUniquifier());
+    expr.eval(this, aggregator);
+    aggregator.processLastPending();
+  }
+
+  @Override
+  public Uniquifier<Target> createUniquifier() {
+    return new AbstractUniquifier<Target, Label>() {
+      @Override
+      protected Label extractKey(Target target) {
+        return target.getLabel();
+      }
+    };
+  }
+
+  @Override
   public Set<Target> getTargetsMatchingPattern(QueryExpression owner, String pattern)
       throws QueryException {
     Set<Target> targets = new LinkedHashSet<>(resolvedTargetPatterns.get(pattern));
@@ -352,7 +376,7 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target> {
     }
   }
 
-  private static Target getSubincludeTarget(final Label label, Package pkg) {
+  private static Target getSubincludeTarget(Label label, Package pkg) {
     return new FakeSubincludeTarget(label, pkg);
   }
 
@@ -668,5 +692,38 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target> {
         .add(new AllRdepsFunction())
         .add(new RBuildFilesFunction())
         .build();
+  }
+
+  private static class BatchStreamedCallback implements Callback<Target> {
+
+    private final Callback<Target> callback;
+    private final Uniquifier<Target> uniquifier;
+    private List<Target> pending = new ArrayList<>();
+    private int batchThreshold;
+
+    private BatchStreamedCallback(Callback<Target> callback, int batchThreshold,
+        Uniquifier<Target> uniquifier) {
+      this.callback = callback;
+      this.batchThreshold = batchThreshold;
+      this.uniquifier = uniquifier;
+    }
+
+    @Override
+    public void process(Iterable<Target> partialResult)
+        throws QueryException, InterruptedException {
+      Preconditions.checkNotNull(pending, "Reuse of the callback is not allowed");
+      pending.addAll(uniquifier.unique(partialResult));
+      if (pending.size() >= batchThreshold) {
+        callback.process(pending);
+        pending = new ArrayList<>();
+      }
+    }
+
+    private void processLastPending() throws QueryException, InterruptedException {
+      if (!pending.isEmpty()) {
+        callback.process(pending);
+        pending = null;
+      }
+    }
   }
 }

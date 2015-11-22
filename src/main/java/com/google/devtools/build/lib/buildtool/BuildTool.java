@@ -64,9 +64,9 @@ import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.packages.TargetUtils;
 import com.google.devtools.build.lib.pkgcache.LoadedPackageProvider;
+import com.google.devtools.build.lib.pkgcache.LoadingCallback;
 import com.google.devtools.build.lib.pkgcache.LoadingFailedException;
-import com.google.devtools.build.lib.pkgcache.LoadingPhaseRunner.Callback;
-import com.google.devtools.build.lib.pkgcache.LoadingPhaseRunner.LoadingResult;
+import com.google.devtools.build.lib.pkgcache.LoadingResult;
 import com.google.devtools.build.lib.profiler.ProfilePhase;
 import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.runtime.BlazeRuntime;
@@ -206,7 +206,7 @@ public final class BuildTool {
       if (needsExecutionPhase(request.getBuildOptions())) {
         runtime.getSkyframeExecutor().injectTopLevelContext(request.getTopLevelArtifactContext());
         executionTool.executeBuild(request.getId(), analysisResult, result,
-            configurations, transformPackageRoots(loadingResult.getPackageRoots()));
+            configurations, transformPackageRoots(analysisResult.getPackageRoots()));
       }
 
       String delayedErrorMsg = analysisResult.getError();
@@ -384,7 +384,7 @@ public final class BuildTool {
 
     final boolean keepGoing = request.getViewOptions().keepGoing;
 
-    Callback callback = new Callback() {
+    LoadingCallback callback = new LoadingCallback() {
       @Override
       public void notifyTargets(Collection<Target> targets) throws LoadingFailedException {
         if (validator != null) {

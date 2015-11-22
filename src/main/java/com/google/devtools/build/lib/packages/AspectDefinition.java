@@ -22,6 +22,7 @@ import com.google.common.collect.LinkedHashMultimap;
 import com.google.common.collect.Multimap;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
+import com.google.devtools.build.lib.packages.NativeAspectClass.NativeAspectFactory;
 import com.google.devtools.build.lib.util.BinaryPredicate;
 
 import java.util.LinkedHashMap;
@@ -31,8 +32,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The definition of an aspect (see {@link com.google.devtools.build.lib.analysis.Aspect} for more
- * information.)
+ * The definition of an aspect (see {@link Aspect} for moreinformation.)
  *
  * <p>Contains enough information to build up the configured target graph except for the actual way
  * to build the Skyframe node (that is the territory of
@@ -131,28 +131,27 @@ public final class AspectDefinition {
     }
     RuleClass ruleClass = ((Rule) to).getRuleClassObject();
     ImmutableSet<Class<?>> providers = ruleClass.getAdvertisedProviders();
-    return visitAspectsIfRequired(from, attribute, toStringSet(providers));
+    return visitAspectsIfRequired((Rule) from, attribute, toStringSet(providers));
   }
 
   /**
    * Returns the attribute -&gt; set of labels that are provided by aspects of attribute.
    */
   public static ImmutableMultimap<Attribute, Label> visitAspectsIfRequired(
-      Target from, Attribute attribute, Set<String> advertisedProviders) {
+      Rule from, Attribute attribute, Set<String> advertisedProviders) {
     if (advertisedProviders.isEmpty()) {
       return ImmutableMultimap.of();
     }
 
     LinkedHashMultimap<Attribute, Label> result = LinkedHashMultimap.create();
-    for (AspectClass candidateClass : attribute.getAspects()) {
-      AspectFactory<?, ?, ?> candidate = AspectFactory.Util.create(candidateClass);
+    for (Aspect candidateClass : attribute.getAspects(from)) {
       // Check if target satisfies condition for this aspect (has to provide all required
       // TransitiveInfoProviders)
       if (!advertisedProviders.containsAll(
-            candidate.getDefinition().getRequiredProviderNames())) {
+          candidateClass.getDefinition().getRequiredProviderNames())) {
         continue;
       }
-      addAllAttributesOfAspect((Rule) from, result, candidate.getDefinition(), Rule.ALL_DEPS);
+      addAllAttributesOfAspect(from, result, candidateClass.getDefinition(), Rule.ALL_DEPS);
     }
     return ImmutableMultimap.copyOf(result);
   }
@@ -214,17 +213,34 @@ public final class AspectDefinition {
      * by direct dependencies through attribute {@code attribute} on the target associated with this
      * aspect.
      *
-     * <p>Note that {@code AspectFactory} instances are expected in the second argument, but we
-     * cannot reference that interface here.
+     * <p>Note that {@code ConfiguredAspectFactory} instances are expected in the second argument,
+     * but we cannot reference that interface here.
      */
     @SafeVarargs
     public final Builder attributeAspect(
-        String attribute, Class<? extends AspectFactory<?, ?, ?>>... aspectFactories) {
+        String attribute, Class<? extends NativeAspectFactory>... aspectFactories) {
       Preconditions.checkNotNull(attribute);
-      for (Class<? extends AspectFactory<?, ?, ?>> aspectFactory : aspectFactories) {
-        this.attributeAspects.put(
-                attribute, new NativeAspectClass(Preconditions.checkNotNull(aspectFactory)));
+      for (Class<? extends NativeAspectFactory> aspectFactory : aspectFactories) {
+        this
+            .attributeAspect(
+                attribute, new NativeAspectClass<>(Preconditions.checkNotNull(aspectFactory)));
       }
+      return this;
+    }
+
+    /**
+     * Declares that this aspect depends on the given {@link AspectClass} provided
+     * by direct dependencies through attribute {@code attribute} on the target associated with this
+     * aspect.
+     *
+     * <p>Note that {@code ConfiguredAspectFactory} instances are expected in the second argument,
+     * but we cannot reference that interface here.
+     */
+    public final Builder attributeAspect(String attribute, AspectClass aspectClass) {
+      Preconditions.checkNotNull(attribute);
+
+      this.attributeAspects.put(attribute, Preconditions.checkNotNull(aspectClass));
+
       return this;
     }
 

@@ -30,6 +30,7 @@ import com.google.devtools.build.lib.analysis.RunfilesProvider;
 import com.google.devtools.build.lib.analysis.RunfilesSupport;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.analysis.actions.FileWriteAction;
+import com.google.devtools.build.lib.analysis.config.CompilationMode;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.packages.BuildType;
@@ -74,7 +75,9 @@ public class JavaBinary implements RuleConfiguredTargetFactory {
     ruleContext.checkSrcsSamePackage(true);
     boolean createExecutable = ruleContext.attributes().get("create_executable", Type.BOOLEAN);
     List<TransitiveInfoCollection> deps =
-        Lists.newArrayList(common.targetsTreatedAsDeps(ClasspathType.COMPILE_ONLY));
+        // Do not remove <TransitiveInfoCollection>: workaround for Java 7 type inference.
+        Lists.<TransitiveInfoCollection>newArrayList(
+            common.targetsTreatedAsDeps(ClasspathType.COMPILE_ONLY));
     semantics.checkRule(ruleContext, common);
     String mainClass = semantics.getMainClass(ruleContext, common);
     String originalMainClass = mainClass;
@@ -108,7 +111,8 @@ public class JavaBinary implements RuleConfiguredTargetFactory {
 
     CppConfiguration cppConfiguration = ruleContext.getConfiguration().getFragment(
         CppConfiguration.class);
-    boolean stripAsDefault = cppConfiguration.useFission();
+    boolean stripAsDefault = cppConfiguration.useFission()
+        && cppConfiguration.getCompilationMode() == CompilationMode.OPT;
     Artifact launcher = semantics.getLauncher(ruleContext, common, deployArchiveBuilder,
         runfilesBuilder, jvmFlags, attributesBuilder, stripAsDefault);
 
@@ -158,9 +162,6 @@ public class JavaBinary implements RuleConfiguredTargetFactory {
       javaArtifactsBuilder.addRuntimeJar(classJar);
     }
 
-    // Any JAR files should be added to the collection of runtime jars.
-    javaArtifactsBuilder.addRuntimeJars(attributes.getJarFiles());
-
     Artifact outputDepsProto = helper.createOutputDepsProtoArtifact(classJar, javaArtifactsBuilder);
 
     common.setJavaCompilationArtifacts(javaArtifactsBuilder.build());
@@ -190,7 +191,7 @@ public class JavaBinary implements RuleConfiguredTargetFactory {
         CppHelper.getToolchain(ruleContext).getDynamicRuntimeLinkInputs();
 
 
-    Iterables.addAll(jvmFlags, semantics.getJvmFlags(ruleContext, common, launcher, userJvmFlags));
+    Iterables.addAll(jvmFlags, semantics.getJvmFlags(ruleContext, common, userJvmFlags));
     if (ruleContext.hasErrors()) {
       return null;
     }
@@ -281,8 +282,8 @@ public class JavaBinary implements RuleConfiguredTargetFactory {
 
     return builder
         .setFilesToBuild(filesToBuild)
-        .add(JavaRuleOutputJarsProvider.class, new JavaRuleOutputJarsProvider(
-            classJar, null /* iJar */, srcJar))
+        .add(JavaRuleOutputJarsProvider.class, JavaRuleOutputJarsProvider.builder()
+            .addOutputJar(classJar, null /* iJar */, srcJar).build())
         .add(RunfilesProvider.class, runfilesProvider)
         .setRunfilesSupport(runfilesSupport, executable)
         .add(

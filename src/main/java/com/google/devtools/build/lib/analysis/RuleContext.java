@@ -136,9 +136,10 @@ public final class RuleContext extends TargetContext
   private final Set<ConfigMatchingProvider> configConditions;
   private final AttributeMap attributes;
   private final ImmutableSet<String> features;
-  private final Map<String, Attribute> attributeMap;
+  private final Map<String, Attribute> aspectAttributes;
   private final BuildConfiguration hostConfiguration;
   private final ConfigurationFragmentPolicy configurationFragmentPolicy;
+  private final Class<? extends BuildConfiguration.Fragment> universalFragment;
   private final ErrorReporter reporter;
 
   private ActionOwner actionOwner;
@@ -148,18 +149,21 @@ public final class RuleContext extends TargetContext
 
   private RuleContext(Builder builder, ListMultimap<String, ConfiguredTarget> targetMap,
       ListMultimap<String, ConfiguredFilesetEntry> filesetEntryMap,
-      Set<ConfigMatchingProvider> configConditions, Map<String, Attribute> attributeMap) {
+      Set<ConfigMatchingProvider> configConditions,
+      Class<? extends BuildConfiguration.Fragment> universalFragment,
+      Map<String, Attribute> aspectAttributes) {
     super(builder.env, builder.rule, builder.configuration, builder.prerequisiteMap.get(null),
         builder.visibility);
     this.rule = builder.rule;
     this.configurationFragmentPolicy = builder.configurationFragmentPolicy;
+    this.universalFragment = universalFragment;
     this.targetMap = targetMap;
     this.filesetEntryMap = filesetEntryMap;
     this.configConditions = configConditions;
     this.attributes =
         ConfiguredAttributeMapper.of(builder.rule, configConditions);
     this.features = getEnabledFeatures();
-    this.attributeMap = attributeMap;
+    this.aspectAttributes = aspectAttributes;
     this.hostConfiguration = builder.hostConfiguration;
     reporter = builder.reporter;
   }
@@ -284,7 +288,7 @@ public final class RuleContext extends TargetContext
         + "in %s configuration in order to access it.%s",
         rule.getRuleClass(), name, FragmentCollection.getConfigurationName(config),
         additionalErrorMessage);
-    return getConfiguration().getFragment(fragment);
+    return getConfiguration(config).getFragment(fragment);
   }
 
   @Nullable
@@ -295,7 +299,8 @@ public final class RuleContext extends TargetContext
 
   @Nullable
   public Fragment getSkylarkFragment(String name, ConfigurationTransition config) {
-    Class<? extends Fragment> fragmentClass = getConfiguration().getSkylarkFragmentByName(name);
+    Class<? extends Fragment> fragmentClass =
+        getConfiguration(config).getSkylarkFragmentByName(name);
     if (fragmentClass == null) {
       return null;
     }
@@ -311,13 +316,10 @@ public final class RuleContext extends TargetContext
     return getConfiguration(config).getSkylarkFragmentNames();
   }
 
-  public ConfigurationFragmentPolicy getConfigurationFragment() {
-    return configurationFragmentPolicy;
-  }
-
   public <T extends Fragment> boolean isLegalFragment(
       Class<T> fragment, ConfigurationTransition config) {
-    return configurationFragmentPolicy.isLegalConfigurationFragment(fragment, config);
+    return fragment == universalFragment
+        || configurationFragmentPolicy.isLegalConfigurationFragment(fragment, config);
   }
 
   public <T extends Fragment> boolean isLegalFragment(Class<T> fragment) {
@@ -560,16 +562,11 @@ public final class RuleContext extends TargetContext
   }
 
   private Attribute getAttribute(String attributeName) {
-    // TODO(bazel-team): We should check original rule for such attribute first, because aspect
-    // can't contain empty attribute. Consider changing type of prerequisiteMap from
-    // ListMultimap<Attribute, ConfiguredTarget> to Map<Attribute, List<ConfiguredTarget>>. This can
-    // also simplify logic in DependencyResolver#resolveExplicitAttributes.
     Attribute result = getRule().getAttributeDefinition(attributeName);
     if (result != null) {
       return result;
     }
-    // Also this attribute can come from aspects, so we also have to check attributeMap.
-    return attributeMap.get(attributeName);
+    return aspectAttributes.get(attributeName);
   }
 
   /**
@@ -1231,6 +1228,7 @@ public final class RuleContext extends TargetContext
     private final AnalysisEnvironment env;
     private final Rule rule;
     private final ConfigurationFragmentPolicy configurationFragmentPolicy;
+    private Class<? extends BuildConfiguration.Fragment> universalFragment;
     private final BuildConfiguration configuration;
     private final BuildConfiguration hostConfiguration;
     private final PrerequisiteValidator prerequisiteValidator;
@@ -1238,6 +1236,7 @@ public final class RuleContext extends TargetContext
     private ListMultimap<Attribute, ConfiguredTarget> prerequisiteMap;
     private Set<ConfigMatchingProvider> configConditions;
     private NestedSet<PackageSpecification> visibility;
+    private Map<String, Attribute> aspectAttributes;
 
     Builder(AnalysisEnvironment env, Rule rule, BuildConfiguration configuration,
         BuildConfiguration hostConfiguration,
@@ -1258,14 +1257,8 @@ public final class RuleContext extends TargetContext
       ListMultimap<String, ConfiguredTarget> targetMap = createTargetMap();
       ListMultimap<String, ConfiguredFilesetEntry> filesetEntryMap =
           createFilesetEntryMap(rule, configConditions);
-      Map<String, Attribute> attributeMap = new HashMap<>();
-      for (Attribute attribute : prerequisiteMap.keySet()) {
-        if (attribute == null) {
-          continue;
-        }
-        attributeMap.put(attribute.getName(), attribute);
-      }
-      return new RuleContext(this, targetMap, filesetEntryMap, configConditions, attributeMap);
+      return new RuleContext(this, targetMap, filesetEntryMap, configConditions, universalFragment,
+          aspectAttributes != null ? aspectAttributes : ImmutableMap.<String, Attribute>of());
     }
 
     Builder setVisibility(NestedSet<PackageSpecification> visibility) {
@@ -1283,11 +1276,31 @@ public final class RuleContext extends TargetContext
     }
 
     /**
+     * Adds attributes which are defined by an Aspect (and not by RuleClass).
+     */
+    Builder setAspectAttributes(Map<String, Attribute> aspectAttributes) {
+      this.aspectAttributes = aspectAttributes;
+      return this;
+    }
+
+    /**
      * Sets the configuration conditions needed to determine which paths to follow for this
      * rule's configurable attributes.
      */
     Builder setConfigConditions(Set<ConfigMatchingProvider> configConditions) {
       this.configConditions = Preconditions.checkNotNull(configConditions);
+      return this;
+    }
+
+    /**
+     * Sets the fragment that can be legally accessed even when not explicitly declared.
+     */
+    Builder setUniversalFragment(Class<? extends BuildConfiguration.Fragment> fragment) {
+      // TODO(bazel-team): Add this directly to ConfigurationFragmentPolicy, so we
+      // don't need separate logic specifically for checking this fragment. The challenge is
+      // that we need RuleClassProvider to figure out what this fragment is, and not every
+      // call state that creates ConfigurationFragmentPolicy has access to that.
+      this.universalFragment = fragment;
       return this;
     }
 
@@ -1589,7 +1602,7 @@ public final class RuleContext extends TargetContext
 
     @Override
     public void attributeError(String attrName, String message) {
-      reportError(getAttributeLocation(attrName), completeAttributeMessage(attrName, message));
+      reportError(rule.getAttributeLocation(attrName), completeAttributeMessage(attrName, message));
     }
 
     public void reportWarning(Location location, String message) {
@@ -1603,7 +1616,8 @@ public final class RuleContext extends TargetContext
 
     @Override
     public void attributeWarning(String attrName, String message) {
-      reportWarning(getAttributeLocation(attrName), completeAttributeMessage(attrName, message));
+      reportWarning(
+          rule.getAttributeLocation(attrName), completeAttributeMessage(attrName, message));
     }
 
     private String prefixRuleMessage(String message) {
@@ -1621,33 +1635,16 @@ public final class RuleContext extends TargetContext
     private String completeAttributeMessage(String attrName, String message) {
       // Appends a note to the given message if the offending rule was created by a macro.
       String macroMessageAppendix =
-          wasCreatedByMacro()
+          rule.wasCreatedByMacro()
               ? String.format(
                   ". Since this rule was created by the macro '%s', the error might have been "
                   + "caused by the macro implementation in %s",
-                  getGeneratorFunction(), rule.getAttributeLocation(attrName))
+                  getGeneratorFunction(), rule.getAttributeLocationWithoutMacro(attrName))
               : "";
 
       return String.format("in %s attribute of %s rule %s: %s%s",
           maskInternalAttributeNames(attrName), rule.getRuleClass(), rule.getLabel(), message,
           macroMessageAppendix);
-    }
-
-    /**
-     * Returns the location of the specified attribute.
-     *
-     * <p>If the rule was created by a macro, we return the location from the BUILD file instead.
-     */
-    private Location getAttributeLocation(String attrName) {
-      // TODO(bazel-team): We assume that macros have set the rule location to the generator
-      // location. It would be better to read the "generator_location" attribute (which is currently
-      // not implemented).
-      return wasCreatedByMacro() ? rule.getLocation() : rule.getAttributeLocation(attrName);
-    }
-
-    private boolean wasCreatedByMacro() {
-      String generator = getGeneratorFunction();
-      return generator != null && !generator.isEmpty();
     }
 
     private String getGeneratorFunction() {

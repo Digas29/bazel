@@ -18,6 +18,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.io.ByteSource;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.rules.apple.AppleConfiguration;
 import com.google.devtools.build.xcode.bundlemerge.proto.BundleMergeProtos;
 import com.google.devtools.build.xcode.bundlemerge.proto.BundleMergeProtos.Control;
 import com.google.devtools.build.xcode.bundlemerge.proto.BundleMergeProtos.MergeZip;
@@ -36,15 +37,15 @@ import java.util.Map;
 final class BundleMergeControlBytes extends ByteSource {
   private final Bundling rootBundling;
   private final Artifact mergedIpa;
-  private final ObjcConfiguration objcConfiguration;
+  private final AppleConfiguration appleConfiguration;
   private final ImmutableSet<TargetDeviceFamily> families;
 
   public BundleMergeControlBytes(
-      Bundling rootBundling, Artifact mergedIpa, ObjcConfiguration objcConfiguration,
+      Bundling rootBundling, Artifact mergedIpa, AppleConfiguration appleConfiguration,
       ImmutableSet<TargetDeviceFamily> families) {
     this.rootBundling = Preconditions.checkNotNull(rootBundling);
     this.mergedIpa = Preconditions.checkNotNull(mergedIpa);
-    this.objcConfiguration = Preconditions.checkNotNull(objcConfiguration);
+    this.appleConfiguration = Preconditions.checkNotNull(appleConfiguration);
     this.families = Preconditions.checkNotNull(families);
   }
 
@@ -58,18 +59,19 @@ final class BundleMergeControlBytes extends ByteSource {
   private Control control(String mergeZipPrefix, Bundling bundling) {
     mergeZipPrefix += bundling.getBundleDir() + "/";
 
-    BundleMergeProtos.Control.Builder control = BundleMergeProtos.Control.newBuilder()
-        .addAllBundleFile(BundleableFile.toBundleFiles(bundling.getBundleFiles()))
-        // TODO(bazel-team): This should really be bundling.getBundleInfoplistInputs since (most of)
-        // those are editable, whereas this is usually the programatically merged plist. If we pass
-        // the sources here though, any synthetic data (generated plists with blaze-derived values)
-        // should be passed as well.
-        .addAllSourcePlistFile(Artifact.toExecPaths(bundling.getBundleInfoplist().asSet()))
-        // TODO(bazel-team): Add rule attribute for specifying targeted device family
-        .setMinimumOsVersion(bundling.getMinimumOsVersion())
-        .setSdkVersion(objcConfiguration.getIosSdkVersion())
-        .setPlatform(objcConfiguration.getBundlingPlatform().name())
-        .setBundleRoot(bundling.getBundleDir());
+    BundleMergeProtos.Control.Builder control =
+        BundleMergeProtos.Control.newBuilder()
+            .addAllBundleFile(BundleableFile.toBundleFiles(bundling.getBundleFiles()))
+            // TODO(bazel-team): This should really be bundling.getBundleInfoplistInputs since
+            // (most of) those are editable, whereas this is usually the programatically merged
+            // plist. If we pass the sources here though, any synthetic data (generated plists with
+            // blaze-derived values) should be passed as well.
+            .addAllSourcePlistFile(Artifact.toExecPaths(bundling.getBundleInfoplist().asSet()))
+            // TODO(bazel-team): Add rule attribute for specifying targeted device family
+            .setMinimumOsVersion(bundling.getMinimumOsVersion().toString())
+            .setSdkVersion(appleConfiguration.getIosSdkVersion().toString())
+            .setPlatform(appleConfiguration.getBundlingPlatform().name())
+            .setBundleRoot(bundling.getBundleDir());
 
     for (Artifact mergeZip : bundling.getMergeZips()) {
       control.addMergeZip(MergeZip.newBuilder()

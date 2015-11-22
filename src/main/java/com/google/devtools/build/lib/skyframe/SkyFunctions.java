@@ -51,6 +51,8 @@ public final class SkyFunctions {
       SkyFunctionName.create("PREPARE_DEPS_OF_PATTERN");
   public static final SkyFunctionName PREPARE_DEPS_OF_TARGETS_UNDER_DIRECTORY =
       SkyFunctionName.create("PREPARE_DEPS_OF_TARGETS_UNDER_DIRECTORY");
+  public static final SkyFunctionName BLACKLISTED_PACKAGE_PREFIXES =
+      SkyFunctionName.create("BLACKLISTED_PACKAGE_PREFIXES");
   public static final SkyFunctionName TEST_SUITE_EXPANSION =
       SkyFunctionName.create("TEST_SUITE_EXPANSION");
   public static final SkyFunctionName TESTS_IN_SUITE = SkyFunctionName.create("TESTS_IN_SUITE");
@@ -65,8 +67,9 @@ public final class SkyFunctions {
       SkyFunctionName.create("CONFIGURED_TARGET");
   public static final SkyFunctionName POST_CONFIGURED_TARGET =
       SkyFunctionName.create("POST_CONFIGURED_TARGET");
-  public static final SkyFunctionName NATIVE_ASPECT = SkyFunctionName.create("NATIVE_ASPECT");
-  public static final SkyFunctionName SKYLARK_ASPECT = SkyFunctionName.create("SKYLARK_ASPECT");
+  public static final SkyFunctionName ASPECT = SkyFunctionName.create("ASPECT");
+  public static final SkyFunctionName LOAD_SKYLARK_ASPECT =
+      SkyFunctionName.create("LOAD_SKYLARK_ASPECT");
   public static final SkyFunctionName TARGET_COMPLETION =
       SkyFunctionName.create("TARGET_COMPLETION");
   public static final SkyFunctionName ASPECT_COMPLETION =

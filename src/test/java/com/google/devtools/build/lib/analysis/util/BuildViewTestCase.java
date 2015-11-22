@@ -51,6 +51,7 @@ import com.google.devtools.build.lib.analysis.ConfiguredAttributeMapper;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.ExtraActionArtifactsProvider;
+import com.google.devtools.build.lib.analysis.ExtraActionArtifactsProvider.ExtraArtifactSet;
 import com.google.devtools.build.lib.analysis.FileConfiguredTarget;
 import com.google.devtools.build.lib.analysis.FileProvider;
 import com.google.devtools.build.lib.analysis.FilesToRunProvider;
@@ -100,8 +101,10 @@ import com.google.devtools.build.lib.packages.Preprocessor;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.packages.util.MockToolsConfig;
+import com.google.devtools.build.lib.pkgcache.LegacyLoadingPhaseRunner;
+import com.google.devtools.build.lib.pkgcache.LoadingOptions;
 import com.google.devtools.build.lib.pkgcache.LoadingPhaseRunner;
-import com.google.devtools.build.lib.pkgcache.LoadingPhaseRunner.LoadingResult;
+import com.google.devtools.build.lib.pkgcache.LoadingResult;
 import com.google.devtools.build.lib.pkgcache.PackageCacheOptions;
 import com.google.devtools.build.lib.pkgcache.PackageManager;
 import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
@@ -208,7 +211,8 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
             getPrecomputedValues(),
             ImmutableList.<SkyValueDirtinessChecker>of());
     skyframeExecutor.preparePackageLoading(
-        new PathPackageLocator(rootDirectory), ConstantRuleVisibility.PUBLIC, true, 7, "",
+        new PathPackageLocator(outputBase, ImmutableList.of(rootDirectory)),
+        ConstantRuleVisibility.PUBLIC, true, 7, "",
         UUID.randomUUID());
     useConfiguration();
     setUpSkyframe();
@@ -501,6 +505,14 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
       return action;
     }
     return getActionGraph().getGeneratingAction(artifact);
+  }
+
+  /**
+   * Returns the SpawnAction that generates an artifact.
+   * Implicitly assumes the action is a SpawnAction.
+   */
+  protected final SpawnAction getGeneratingSpawnAction(Artifact artifact) {
+    return (SpawnAction) getGeneratingAction(artifact);
   }
 
   protected void simulateLoadingPhase() {
@@ -1135,15 +1147,6 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
    * sublist. This is useful for checking that a list of arguments contains a
    * particular set of arguments.
    */
-  protected void assertContainsSublist(List<String> list, String... sublist) {
-    assertContainsSublist(null, list, Arrays.asList(sublist));
-  }
-
-  /**
-   * Utility method for asserting that a list contains the elements of a
-   * sublist. This is useful for checking that a list of arguments contains a
-   * particular set of arguments.
-   */
   protected void assertContainsSublist(List<String> list, List<String> sublist) {
     assertContainsSublist(null, list, sublist);
   }
@@ -1188,6 +1191,23 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
     return ImmutableList.copyOf(result);
   }
 
+  /**
+   * Returns all extra actions for that target (including transitive actions).
+   */
+  protected ImmutableList<ExtraAction> getTransitiveExtraActionActions(ConfiguredTarget target) {
+    ImmutableList.Builder<ExtraAction> result = new ImmutableList.Builder<>();
+    for (ExtraArtifactSet set : target.getProvider(ExtraActionArtifactsProvider.class)
+        .getTransitiveExtraActionArtifacts()) {
+      for (Artifact artifact : set.getArtifacts()) {
+        Action action = getGeneratingAction(artifact);
+        if (action instanceof ExtraAction) {
+          result.add((ExtraAction) action);
+        }
+      }
+    }
+    return result.build();
+  }
+
   protected ImmutableList<Action> getFilesToBuildActions(ConfiguredTarget target) {
     List<Action> result = new ArrayList<>();
     for (Artifact artifact : getFilesToBuild(target)) {
@@ -1207,7 +1227,7 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
         : provider.getOutputGroup(outputGroup);
   }
 
-  protected ImmutableList<Artifact> getExtraActionArtifacts(ConfiguredTarget target) {
+  protected NestedSet<Artifact> getExtraActionArtifacts(ConfiguredTarget target) {
     return target.getProvider(ExtraActionArtifactsProvider.class).getExtraActionArtifacts();
   }
 
@@ -1294,14 +1314,13 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
       EventBus eventBus)
       throws Exception {
 
-    LoadingPhaseRunner.Options loadingOptions =
-        Options.getDefaults(LoadingPhaseRunner.Options.class);
+    LoadingOptions loadingOptions = Options.getDefaults(LoadingOptions.class);
     loadingOptions.loadingPhaseThreads = loadingPhaseThreads;
 
     BuildView.Options viewOptions = Options.getDefaults(BuildView.Options.class);
     viewOptions.keepGoing = keepGoing;
 
-    LoadingPhaseRunner runner = new LoadingPhaseRunner(getPackageManager(),
+    LoadingPhaseRunner runner = new LegacyLoadingPhaseRunner(getPackageManager(),
         Collections.unmodifiableSet(ruleClassProvider.getRuleClassMap().keySet()));
     LoadingResult loadingResult = runner.execute(reporter, eventBus, targets, loadingOptions,
         getTargetConfiguration().getAllLabels(), viewOptions.keepGoing,
@@ -1354,11 +1373,9 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
     return result;
   }
 
-  protected SpawnAction getGeneratingAction(ConfiguredTarget target,
-      String outputName) {
-    Artifact found = Iterables.find(getFilesToBuild(target),
-        artifactNamed(outputName));
-    return (SpawnAction) getGeneratingAction(found);
+  protected SpawnAction getGeneratingAction(ConfiguredTarget target, String outputName) {
+    return getGeneratingSpawnAction(
+        Iterables.find(getFilesToBuild(target), artifactNamed(outputName)));
   }
 
   protected String getErrorMsgSingleFile(String attrName, String ruleType, String ruleName,

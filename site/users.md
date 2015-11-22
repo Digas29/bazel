@@ -21,20 +21,25 @@ Bazel to build their software (including their embedded C++ software).
 If you'd like your project listed here, please
 [let us know](mailto:kchodorow@google.com?subject=My project uses Bazel)!
 
-## [GRPC](http://www.grpc.io)
+## [CallBuilder](https://github.com/google/CallBuilder)
 
-A language-and-platform-neutral remote procedure call system. (Bazel is a
-supported, although not primary, build system.)
+A Java code generator that allows you to create a builder by writing one
+function.
 
 ## [Error Prone](https://github.com/google/error-prone)
 
 Catches common Java mistakes as compile-time errors. (Migration to Bazel is
 in progress.)
 
-## [CallBuilder](https://github.com/google/CallBuilder)
+## [GRPC](http://www.grpc.io)
 
-A Java code generator that allows you to create a builder by writing one
-function.
+A language-and-platform-neutral remote procedure call system. (Bazel is a
+supported, although not primary, build system.)
+
+## [Jsonnet](http://google.github.io/jsonnet/doc/)
+
+An elegant, formally-specified config generation language for JSON. (Bazel is a
+supported build system.)
 
 ## [Kythe](https://github.com/google/kythe)
 
@@ -48,6 +53,10 @@ PetitParser combines ideas from scannnerless parsing, parser combinators,
 parsing expression grammars and packrat parsers to model grammars and parsers
 as objects that can be reconfigured dynamically.
 
+## [TensorFlow](http://tensorflow.org)
+
+An open source software library for machine intelligence.
+
 ## [Trunk](https://github.com/mzhaom/trunk)
 
 A collection of C++/Java opensource projects with BUILD files so they
@@ -57,5 +66,3 @@ grpc (maybe thrift).
 ## [Turbo Santa](https://github.com/turbo-santa/turbo-santa-common)
 
 A platform-independent GameBoy emulator.
-
-

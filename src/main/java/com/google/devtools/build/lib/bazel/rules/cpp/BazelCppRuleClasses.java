@@ -59,6 +59,7 @@ import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
 import com.google.devtools.build.lib.packages.RuleClass.Builder.RuleClassType;
 import com.google.devtools.build.lib.packages.TriState;
+import com.google.devtools.build.lib.rules.apple.AppleConfiguration;
 import com.google.devtools.build.lib.rules.cpp.CppConfiguration;
 import com.google.devtools.build.lib.rules.cpp.CppFileTypes;
 import com.google.devtools.build.lib.rules.cpp.CppRuleClasses;
@@ -259,8 +260,8 @@ public class BazelCppRuleClasses {
           so be careful about header files included elsewhere.</p>
           <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
           .add(attr("copts", STRING_LIST))
-          .add(attr("$stl", LABEL).value(
-              env.getLabel(Constants.TOOLS_REPOSITORY + "//tools/cpp:stl")))
+          .add(attr("$stl", LABEL).value(env.getLabel(
+              Constants.TOOLS_REPOSITORY + "//tools/cpp:stl")))
           .add(attr(":stl", LABEL).value(STL))
           .build();
     }
@@ -303,10 +304,10 @@ public class BazelCppRuleClasses {
           <i>(Dictionary mapping strings to lists of
              <a href="build-ref.html#labels">labels</a>; optional)</i>
           <p><i><a href="#configurable-attributes">Configurable attributes</a> is a generalization
-            of the same concept that works for most rules and attributes. It mostly deprecates
-            <code>abi_deps</code>, which we expect to remove it as soon as possible. Use
-            configurable attributes over <code>abi_deps</code> whenever possible. If the former is
-            insufficient for you, please let us know why.</i>
+            of the same concept that works for most rules and attributes. It deprecates
+            <code>abi_deps</code>, which we intend to ultimately remove. Use configurable
+            attributes over <code>abi_deps</code> whenever possible. When not possible, let
+            us know why.</i>
           </p>
           <p>Each entry in this dictionary follows the form of
              <code>'pattern' : ['label1', 'label2', ...]</code>.  If the library's
@@ -412,10 +413,7 @@ public class BazelCppRuleClasses {
              inclusion by sources in this rule. Both <code>.cc</code> and
              <code>.h</code> files can directly include headers listed in
              these <code>srcs</code> or in the <code>hdrs</code> of any rule listed in
-             the <code>deps</code> argument. For compatibility with older
-             implementations, and depending on the checking strictness specified by
-             each library, additional headers may be available for inclusion. See
-             <a href="#cc_library.hdrs_check"><code>cc_library.hdrs_check</code></a>.
+             the <code>deps</code> argument.
           </p>
           <p>All <code>#include</code>d files must be mentioned in the
              <code>srcs</code> attribute of this rule, or in the
@@ -494,37 +492,6 @@ public class BazelCppRuleClasses {
           This attribute should rarely be needed.
           <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
           .add(attr("nocopts", STRING))
-          // cc_library.hdrs_check is an alias for cc_binary.hdrs_check
-          // because many external links depend on it.
-          /*<!-- #BLAZE_RULE($cc_rule).ATTRIBUTE(hdrs_check)[DEPRECATED] -->
-          Deprecated: we will roll out support for C++ modules, which are strict by design.
-          <a id="cc_library.hdrs_check"></a>
-          The strictness of the header file check to be applied to dependents and the
-          source files of this library. Must be one of: <code>"loose"</code>,
-          <code>"warn"</code> or <code>"strict"</code>.
-          ${SYNOPSIS}
-          <p>
-             The three levels of checking operate as follows:
-          </p>
-          <ul>
-             <li><code>"loose"</code>: Any source header file in any of the
-             directories of the containing package may be <code>#include</code>d by
-             sources in this rule and dependent rules. Generated header files must be
-             explicitly listed in <code>hdrs</code> or <code>srcs</code>. This
-             check level is the current default, but it will be phased out.</li>
-             <li><code>"warn"</code>: Enforcement is the same as for
-             <code>"loose"</code>, but any case that would violate the
-             <code>"strict"</code> check will cause a warning to be emitted.
-             This check level is provided to help with the migration to strict.</li>
-             <li><code>"strict"</code>: All <code>#include</code>d files must be explicitly declared
-             somewhere in the <code>hdrs</code> or <code>srcs</code> of the rules providing the
-             libraries or the rules containing the including source. Note that this means that a
-             rule can include any header that is in the <code>hdrs</code> or <code>srcs</code> of
-             any rule it transitively depends on. A stricter layering check is currently being
-             rolled out.</li>
-          </ul>
-          <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
-          .add(attr("hdrs_check", STRING).value("strict"))
           /*<!-- #BLAZE_RULE($cc_rule).ATTRIBUTE(linkstatic) -->
            Link the binary in mostly-static mode.
            ${SYNOPSIS}
@@ -643,7 +610,7 @@ public class BazelCppRuleClasses {
     @Override
     public RuleClass build(Builder builder, RuleDefinitionEnvironment env) {
       return builder
-          .requiresConfigurationFragments(CppConfiguration.class)
+          .requiresConfigurationFragments(CppConfiguration.class, AppleConfiguration.class)
           /*<!-- #BLAZE_RULE(cc_binary).IMPLICIT_OUTPUTS -->
           <ul>
           <li><code><var>name</var>.stripped</code> (only built if explicitly requested): A stripped
@@ -789,7 +756,7 @@ public class BazelCppRuleClasses {
           // TODO: Google cc_library overrides documentation for:
           // deps, data, linkopts, defines, srcs; override here too?
 
-          .requiresConfigurationFragments(CppConfiguration.class)
+          .requiresConfigurationFragments(CppConfiguration.class, AppleConfiguration.class)
           /*<!-- #BLAZE_RULE(cc_library).ATTRIBUTE(alwayslink) -->
           If 1, any binary that depends (directly or indirectly) on this C++
           library will link in all the object files for the files listed in
@@ -837,8 +804,7 @@ ${ATTRIBUTE_DEFINITION}
 
 <p>
   All header files that are used in the build must be declared in the <code>hdrs</code> or
-  <code>srcs</code> of <code>cc_*</code> rules. This is enforced by default (i.e.
-  <code><a href="#cc_library.hdrs_check">hdrs_check</a> = 'strict'</code>).
+  <code>srcs</code> of <code>cc_*</code> rules. This is enforced.
 </p>
 
 <p>

@@ -17,6 +17,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.TargetParsingException;
@@ -31,6 +32,7 @@ import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
 import com.google.devtools.build.lib.pkgcache.TargetPatternEvaluator;
 import com.google.devtools.build.lib.pkgcache.TransitivePackageLoader;
 import com.google.devtools.build.lib.profiler.AutoProfiler;
+import com.google.devtools.build.lib.query2.engine.Callback;
 import com.google.devtools.build.lib.query2.engine.QueryEnvironment;
 import com.google.devtools.build.lib.query2.engine.QueryEvalResult;
 import com.google.devtools.build.lib.query2.engine.QueryException;
@@ -44,6 +46,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Logger;
 
 import javax.annotation.Nullable;
@@ -135,10 +138,11 @@ public abstract class AbstractBlazeQueryEnvironment<T> implements QueryEnvironme
    * @throws QueryException if the evaluation failed and {@code --nokeep_going} was in
    *   effect
    */
-  public QueryEvalResult<T> evaluateQuery(QueryExpression expr)
+  public QueryEvalResult evaluateQuery(QueryExpression expr, final Callback<T> callback)
       throws QueryException, InterruptedException {
-    Set<T> resultNodes;
-    try (AutoProfiler p = AutoProfiler.logged("evaluating query", LOG)) {
+
+    final AtomicBoolean empty = new AtomicBoolean(true);
+    try (final AutoProfiler p = AutoProfiler.logged("evaluating query", LOG)) {
       resolvedTargetPatterns.clear();
 
       // In the --nokeep_going case, errors are reported in the order in which the patterns are
@@ -151,9 +155,15 @@ public abstract class AbstractBlazeQueryEnvironment<T> implements QueryEnvironme
         // Unfortunately, by evaluating the patterns in parallel, we lose some location information.
         throw new QueryException(expr, e.getMessage());
       }
-
       try {
-        resultNodes = expr.eval(this);
+        this.eval(expr, new Callback<T>() {
+          @Override
+          public void process(Iterable<T> partialResult)
+              throws QueryException, InterruptedException {
+            empty.compareAndSet(true, Iterables.isEmpty(partialResult));
+            callback.process(partialResult);
+          }
+        });
       } catch (QueryException e) {
         throw new QueryException(e, expr);
       }
@@ -171,12 +181,12 @@ public abstract class AbstractBlazeQueryEnvironment<T> implements QueryEnvironme
       }
     }
 
-    return new QueryEvalResult<>(!eventHandler.hasErrors(), resultNodes);
+    return new QueryEvalResult(!eventHandler.hasErrors(), empty.get());
   }
 
-  public QueryEvalResult<T> evaluateQuery(String query)
+  public QueryEvalResult evaluateQuery(String query, Callback<T> callback)
       throws QueryException, InterruptedException {
-    return evaluateQuery(QueryExpression.parse(query, this));
+    return evaluateQuery(QueryExpression.parse(query, this), callback);
   }
 
   @Override
