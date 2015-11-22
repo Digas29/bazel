@@ -61,7 +61,8 @@ public class AndroidNdkCrosstoolsTest {
   static {
     try {
 
-      String hostPlatform = AndroidNdkCrosstools.getHostPlatform(NDK_RELEASE);
+      // NDK test data is based on the x86 64-bit Linux Android NDK.
+      String hostPlatform = "linux-x86_64";
       NdkPaths ndkPaths = new NdkPaths(
           REPOSITORY_NAME,
           hostPlatform,
@@ -134,8 +135,7 @@ public class AndroidNdkCrosstoolsTest {
   
         // Test that all tool paths exist.
         for (ToolPath toolpath : toolchain.getToolPathList()) {
-          String path = NdkPaths.stripRepositoryPrefix(toolpath.getPath());
-          assertThat(NDK_FILES).contains(path);
+          assertThat(NDK_FILES).contains(toolpath.getPath());
         }
   
         // Test that all cxx_builtin_include_directory paths exist.

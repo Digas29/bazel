@@ -17,6 +17,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.cmdline.PackageIdentifier.RepositoryName;
 import com.google.devtools.build.lib.events.Event;
@@ -47,6 +48,8 @@ import java.util.Set;
  */
 abstract class RecursiveDirectoryTraversalFunction
     <TVisitor extends RecursiveDirectoryTraversalFunction.Visitor, TReturn> {
+  private static final String SENTINEL_FILE_NAME_FOR_NOT_TRAVERSING_SYMLINKS =
+      "DONT_FOLLOW_SYMLINKS_WHEN_TRAVERSING_THIS_DIRECTORY_VIA_A_RECURSIVE_TARGET_PATTERN";
 
   /**
    * Returned from {@link #visitDirectory} if its {@code recursivePkgKey} is a symlink or not a
@@ -112,7 +115,13 @@ abstract class RecursiveDirectoryTraversalFunction
    */
   TReturn visitDirectory(RecursivePkgKey recursivePkgKey, Environment env) {
     RootedPath rootedPath = recursivePkgKey.getRootedPath();
-    Set<PathFragment> excludedPaths = recursivePkgKey.getExcludedPaths();
+    BlacklistedPackagePrefixesValue blacklist =
+        (BlacklistedPackagePrefixesValue) env.getValue(BlacklistedPackagePrefixesValue.key());
+    if (blacklist == null) {
+      return null;
+    }
+    Set<PathFragment> excludedPaths =
+        Sets.union(recursivePkgKey.getExcludedPaths(), blacklist.getPatterns());
     Path root = rootedPath.getRoot();
     PathFragment rootRelativePath = rootedPath.getRelativePath();
 
@@ -225,16 +234,18 @@ abstract class RecursiveDirectoryTraversalFunction
     }
 
     List<SkyKey> childDeps = Lists.newArrayList();
+    boolean followSymlinks = shouldFollowSymlinksWhenTraversing(dirListingValue.getDirents());
     for (Dirent dirent : dirListingValue.getDirents()) {
-      if (dirent.getType() != Type.DIRECTORY && dirent.getType() != Type.SYMLINK) {
+      Type type = dirent.getType();
+      if (type != Type.DIRECTORY
+          && (type != Type.SYMLINK || (type == Type.SYMLINK && !followSymlinks))) {
         // Non-directories can never host packages. Symlinks to non-directories are weeded out at
         // the next level of recursion when we check if its FileValue is a directory. This is slower
         // if there are a lot of symlinks in the tree, but faster if there are only a few, which is
         // the case most of the time.
         //
-        // We are not afraid of weird symlink structure here: cyclical ones are diagnosed by
-        // FileValue and ones that give rise to infinite directory trees work just like they do with
-        // globbing: they work until a certain level of nesting, after which they fail.
+        // We are not afraid of weird symlink structure here: both cyclical ones and ones that give
+        // rise to infinite directory trees are diagnosed by FileValue.
         continue;
       }
       String basename = dirent.getName();
@@ -273,6 +284,20 @@ abstract class RecursiveDirectoryTraversalFunction
       return null;
     }
     return aggregateWithSubdirectorySkyValues(visitor, subdirectorySkyValues);
+  }
+
+  private static boolean shouldFollowSymlinksWhenTraversing(Dirents dirents) {
+    for (Dirent dirent : dirents) {
+      // This is a specical sentinel file whose existence tells Blaze not to follow symlinks when
+      // recursively traversing through this directory.
+      //
+      // This admittedly ugly feature is used to support workspaces with directories with weird
+      // symlink structures that aren't intended to be consumed by Blaze.
+      if (dirent.getName().equals(SENTINEL_FILE_NAME_FOR_NOT_TRAVERSING_SYMLINKS)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   // Ignore all errors in traversal and return an empty value.

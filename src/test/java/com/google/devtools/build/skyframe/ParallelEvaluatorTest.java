@@ -18,8 +18,6 @@ import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
 import static com.google.devtools.build.lib.testutil.MoreAsserts.assertContainsEvent;
 import static com.google.devtools.build.lib.testutil.MoreAsserts.assertEventCount;
-import static com.google.devtools.build.lib.testutil.MoreAsserts.assertGreaterThan;
-import static com.google.devtools.build.lib.testutil.MoreAsserts.assertLessThan;
 import static com.google.devtools.build.lib.testutil.MoreAsserts.assertNoEvents;
 import static com.google.devtools.build.skyframe.GraphTester.CONCATENATE;
 import static org.junit.Assert.assertEquals;
@@ -41,8 +39,6 @@ import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventCollector;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.EventKind;
-import com.google.devtools.build.lib.events.OutputFilter.RegexOutputFilter;
-import com.google.devtools.build.lib.events.Reporter;
 import com.google.devtools.build.lib.testutil.TestThread;
 import com.google.devtools.build.lib.testutil.TestUtils;
 import com.google.devtools.build.skyframe.GraphTester.StringValue;
@@ -83,14 +79,12 @@ public class ParallelEvaluatorTest {
   protected GraphTester tester = new GraphTester();
 
   private EventCollector eventCollector;
-  private EventHandler reporter;
 
   private EvaluationProgressReceiver revalidationReceiver;
 
   @Before
   public void initializeReporter() {
-    eventCollector = new EventCollector(EventKind.ALL_EVENTS);
-    reporter = new Reporter(eventCollector);
+    eventCollector = new EventCollector();
   }
 
   @After
@@ -111,7 +105,7 @@ public class ParallelEvaluatorTest {
     return new ParallelEvaluator(graph,
         oldGraphVersion,
         builders,
-        reporter,
+        eventCollector,
         new MemoizingEvaluator.EmittedEventState(),
         storedEventFilter,
         keepGoing,
@@ -434,42 +428,6 @@ public class ParallelEvaluatorTest {
     assertEquals("a", value.getValue());
     assertContainsEvent(eventCollector, "warning on 'a'");
     assertEventCount(1, eventCollector);
-  }
-
-  @Test
-  public void warningMatchesRegex() throws Exception {
-    graph = new InMemoryGraph();
-    ((Reporter) reporter).setOutputFilter(RegexOutputFilter.forRegex("a"));
-    set("example", "a value").setWarning("warning message");
-    SkyKey a = GraphTester.toSkyKey("example");
-    tester.getOrCreate(a).setTag("a");
-    StringValue value = (StringValue) eval(false, a);
-    assertEquals("a value", value.getValue());
-    assertContainsEvent(eventCollector, "warning message");
-    assertEventCount(1, eventCollector);
-  }
-
-  @Test
-  public void warningMatchesRegexOnlyTag() throws Exception {
-    graph = new InMemoryGraph();
-    ((Reporter) reporter).setOutputFilter(RegexOutputFilter.forRegex("a"));
-    set("a", "a value").setWarning("warning on 'a'");
-    SkyKey a = GraphTester.toSkyKey("a");
-    tester.getOrCreate(a).setTag("b");
-    StringValue value = (StringValue) eval(false, a);
-    assertEquals("a value", value.getValue());
-    assertEventCount(0, eventCollector);  }
-
-  @Test
-  public void warningDoesNotMatchRegex() throws Exception {
-    graph = new InMemoryGraph();
-    ((Reporter) reporter).setOutputFilter(RegexOutputFilter.forRegex("b"));
-    set("a", "a").setWarning("warning on 'a'");
-    SkyKey a = GraphTester.toSkyKey("a");
-    tester.getOrCreate(a).setTag("a");
-    StringValue value = (StringValue) eval(false, a);
-    assertEquals("a", value.getValue());
-    assertEventCount(0, eventCollector);
   }
 
   /** Regression test: events from already-done value not replayed. */
@@ -1109,8 +1067,8 @@ public class ParallelEvaluatorTest {
    * topKey, if {@code selfEdge} is true.
    */
   private static void assertManyCycles(ErrorInfo errorInfo, SkyKey topKey, boolean selfEdge) {
-    assertGreaterThan(1, Iterables.size(errorInfo.getCycleInfo()));
-    assertLessThan(50, Iterables.size(errorInfo.getCycleInfo()));
+    assertThat(Iterables.size(errorInfo.getCycleInfo())).isGreaterThan(1);
+    assertThat(Iterables.size(errorInfo.getCycleInfo())).isLessThan(50);
     boolean foundSelfEdge = false;
     for (CycleInfo cycle : errorInfo.getCycleInfo()) {
       assertEquals(1, cycle.getCycle().size()); // Self-edge.

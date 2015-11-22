@@ -35,7 +35,7 @@ import java.util.List;
  */
 // Not final only for testing.
 @ThreadSafe
-public class UnixFileSystem extends AbstractFileSystem {
+public class UnixFileSystem extends AbstractFileSystemWithCustomStat {
 
   public static final UnixFileSystem INSTANCE = new UnixFileSystem();
   /**
@@ -366,11 +366,11 @@ public class UnixFileSystem extends AbstractFileSystem {
   protected void setLastModifiedTime(Path path, long newTime) throws IOException {
     synchronized (path) {
       if (newTime == -1L) { // "now"
-        FilesystemUtils.utime(path.toString(), true, 0, 0);
+        FilesystemUtils.utime(path.toString(), true, 0);
       } else {
         // newTime > MAX_INT => -ve unixTime
         int unixTime = (int) (newTime / 1000);
-        FilesystemUtils.utime(path.toString(), false, unixTime, unixTime);
+        FilesystemUtils.utime(path.toString(), false, unixTime);
       }
     }
   }

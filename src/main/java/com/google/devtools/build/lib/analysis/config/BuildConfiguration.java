@@ -24,6 +24,7 @@ import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.ImmutableSortedMap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Maps;
@@ -32,7 +33,6 @@ import com.google.common.collect.MutableClassToInstanceMap;
 import com.google.devtools.build.lib.actions.ArtifactFactory;
 import com.google.devtools.build.lib.actions.PackageRootResolver;
 import com.google.devtools.build.lib.actions.Root;
-import com.google.devtools.build.lib.analysis.AspectWithParameters;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 import com.google.devtools.build.lib.analysis.DependencyResolver;
@@ -43,6 +43,7 @@ import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
+import com.google.devtools.build.lib.packages.Aspect;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.Attribute.Configurator;
 import com.google.devtools.build.lib.packages.Attribute.SplitTransition;
@@ -79,12 +80,14 @@ import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Queue;
 import java.util.Set;
 import java.util.TreeMap;
@@ -944,6 +947,29 @@ public final class BuildConfiguration {
           outputDir.getRelative(BlazeDirectories.RELATIVE_INCLUDE_DIR));
       this.middlemanDirectory = Root.middlemanRoot(execRoot, outputDir);
     }
+
+    @Override
+    public boolean equals(Object o) {
+      if (o == this) {
+        return true;
+      }
+      if (!(o instanceof OutputRoots)) {
+        return false;
+      }
+      OutputRoots other = (OutputRoots) o;
+      return outputDirectory.equals(other.outputDirectory)
+          && binDirectory.equals(other.binDirectory)
+          && genfilesDirectory.equals(other.genfilesDirectory)
+          && coverageMetadataDirectory.equals(other.coverageMetadataDirectory)
+          && testLogsDirectory.equals(other.testLogsDirectory)
+          && includeDirectory.equals(other.includeDirectory);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(outputDirectory, binDirectory, genfilesDirectory,
+          coverageMetadataDirectory, testLogsDirectory, includeDirectory);
+    }
   }
 
   private final String checksum;
@@ -1059,6 +1085,23 @@ public final class BuildConfiguration {
   private final Map<String, OptionDetails> transitiveOptionsMap;
 
   /**
+   * Returns true if this configuration is semantically equal to the other, with
+   * the possible exception that the other has fewer fragments.
+   *
+   * <p>This is useful for dynamic configurations - as the same configuration gets "trimmed" while
+   * going down a dependency chain, it's still the same configuration but loses some of its
+   * fragments. So we need a more nuanced concept of "equality" than simple reference equality.
+   */
+  public boolean equalsOrIsSupersetOf(BuildConfiguration other) {
+    return this.equals(other)
+        || (other != null
+                && outputRoots.equals(other.outputRoots)
+                && actionsEnabled == other.actionsEnabled
+                && fragments.values().containsAll(other.fragments.values())
+                && buildOptions.getOptions().containsAll(other.buildOptions.getOptions()));
+  }
+
+  /**
    * Returns map of all the fragments for this configuration.
    */
   public ImmutableMap<Class<? extends Fragment>, Fragment> getAllFragments() {
@@ -1117,6 +1160,18 @@ public final class BuildConfiguration {
   }
 
   /**
+   * Sorts fragments by class name. This produces a stable order which, e.g., facilitates
+   * consistent output from buildMneumonic.
+   */
+  private final static Comparator lexicalFragmentSorter =
+      new Comparator<Class<? extends Fragment>>() {
+        @Override
+        public int compare(Class<? extends Fragment> o1, Class<? extends Fragment> o2) {
+          return o1.getName().compareTo(o2.getName());
+        }
+      };
+
+  /**
    * Constructs a new BuildConfiguration instance.
    */
   public BuildConfiguration(BlazeDirectories directories,
@@ -1137,7 +1192,7 @@ public final class BuildConfiguration {
       boolean actionsDisabled) {
     Preconditions.checkState(outputRoots == null ^ directories == null);
     this.actionsEnabled = !actionsDisabled;
-    this.fragments = ImmutableMap.copyOf(fragmentsMap);
+    this.fragments = ImmutableSortedMap.copyOf(fragmentsMap, lexicalFragmentSorter);
 
     this.skylarkVisibleFragments = buildIndexOfVisibleFragments();
     
@@ -1452,8 +1507,8 @@ public final class BuildConfiguration {
      * for each configuration represented by this instance.
      * TODO(bazel-team): this is a really ugly reverse dependency: factor this away.
      */
-    Iterable<DependencyResolver.Dependency> getDependencies(Label label,
-        ImmutableSet<AspectWithParameters> aspects);
+    Iterable<DependencyResolver.Dependency> getDependencies(
+        Label label, ImmutableSet<Aspect> aspects);
   }
 
   /**
@@ -1526,8 +1581,8 @@ public final class BuildConfiguration {
     }
 
     @Override
-    public Iterable<DependencyResolver.Dependency> getDependencies(Label label,
-        ImmutableSet<AspectWithParameters> aspects) {
+    public Iterable<DependencyResolver.Dependency> getDependencies(
+        Label label, ImmutableSet<Aspect> aspects) {
       return ImmutableList.of(
           new DependencyResolver.Dependency(label, currentConfiguration, aspects));
     }
@@ -1627,8 +1682,8 @@ public final class BuildConfiguration {
     }
 
     @Override
-    public Iterable<DependencyResolver.Dependency> getDependencies(Label label,
-        ImmutableSet<AspectWithParameters> aspects) {
+    public Iterable<DependencyResolver.Dependency> getDependencies(
+        Label label, ImmutableSet<Aspect> aspects) {
       return ImmutableList.of(new DependencyResolver.Dependency(label, transition, aspects));
     }
   }
@@ -1694,8 +1749,8 @@ public final class BuildConfiguration {
 
 
     @Override
-    public Iterable<DependencyResolver.Dependency> getDependencies(Label label,
-        ImmutableSet<AspectWithParameters> aspects) {
+    public Iterable<DependencyResolver.Dependency> getDependencies(
+        Label label, ImmutableSet<Aspect> aspects) {
       ImmutableList.Builder<DependencyResolver.Dependency> builder = ImmutableList.builder();
       for (TransitionApplier applier : appliers) {
         builder.addAll(applier.getDependencies(label, aspects));
@@ -1761,9 +1816,9 @@ public final class BuildConfiguration {
     // declares a host configuration transition). We want to explicitly exclude configuration labels
     // from these transitions, since their *purpose* is to do computation on the owning
     // rule's configuration.
-    // TODO(bazel-team): implement this more elegantly. This is far too hackish. Specifically:
-    // don't reference the rule name explicitly and don't require special-casing here.
-    if (toTarget instanceof Rule && ((Rule) toTarget).getRuleClass().equals("config_setting")) {
+    // TODO(bazel-team): don't require special casing here. This is far too hackish.
+    if (toTarget instanceof Rule
+        && ((Rule) toTarget).getRuleClass().equals(ConfigRuleClasses.ConfigSettingRule.RULE_NAME)) {
       transitionApplier.applyTransition(Attribute.ConfigurationTransition.NONE); // Unnecessary.
       return;
     }

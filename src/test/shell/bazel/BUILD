@@ -28,6 +28,7 @@ filegroup(
             "//src/tools/xcode/realpath",
             "//src/tools/xcode/stdredirect:StdRedirect.dylib",
             "//src/tools/xcode/swiftstdlibtoolwrapper",
+            "//src/tools/xcode/xcrunwrapper",
             "//third_party/iossim",
         ],
         "//conditions:default": [],
@@ -86,6 +87,8 @@ sh_test(
     data = [
         ":test-deps",
         "//tools/build_rules/go:srcs",
+        "//tools/build_rules/go/toolchain",
+        "//tools/build_rules/go/toolchain:go_tool",
         "//tools/build_rules/go/toolchain:srcs",
         "//tools/build_rules/go/tools:srcs",
     ],
@@ -123,7 +126,7 @@ genrule(
     srcs = [
         "//src/java_tools/singlejar:srcs",
         "//src/main/protobuf:srcs",
-        "//src/main/java:srcs",
+        "//src/main/java/com/google/devtools/build/lib:srcs",
         "//src/main/java/com/google/devtools/build/lib/actions:srcs",
         "//src/main/java/com/google/devtools/build/lib/sandbox:srcs",
         "//src/main/java/com/google/devtools/build/lib/rules/genquery:srcs",
@@ -192,7 +195,7 @@ sh_test(
 
 sh_test(
     name = "maven_test",
-    size = "large",
+    size = "medium",
     srcs = ["maven_test.sh"],
     data = [":test-deps"],
 )
@@ -214,9 +217,14 @@ sh_test(
 
 sh_test(
     name = "process_wrapper_test",
-    size = "large",
+    size = "small",
     srcs = ["process-wrapper_test.sh"],
-    data = [":test-deps"],
+    data = [
+        "test-setup.sh",
+        "testenv.sh",
+        "//src/main/tools:process-wrapper",
+        "//src/test/shell:bashunit",
+    ],
 )
 
 sh_test(
@@ -243,8 +251,9 @@ sh_test(
     srcs = ["bazel_worker_test.sh"],
     data = [
         ":test-deps",
-        "//src/test/java:worker-example_deploy.jar",
+        "//src/test/java/com/google/devtools/build/lib:worker-example_deploy.jar",
     ],
+    tags = ["manual"],
 )
 
 sh_test(

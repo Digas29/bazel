@@ -14,8 +14,8 @@
 
 package com.google.devtools.build.lib.packages;
 
-import static com.google.devtools.build.lib.packages.Attribute.ConfigurationTransition.HOST;
 import static com.google.devtools.build.lib.packages.Attribute.attr;
+import static com.google.devtools.build.lib.packages.Attribute.ConfigurationTransition.HOST;
 import static com.google.devtools.build.lib.packages.BuildType.LABEL_LIST;
 import static com.google.devtools.build.lib.syntax.Type.BOOLEAN;
 
@@ -563,24 +563,50 @@ public final class RuleClass {
       Preconditions.checkState(skylarkExecutable == (ruleDefinitionEnvironment != null));
       Preconditions.checkState(workspaceOnly || externalBindingsFunction == NO_EXTERNAL_BINDINGS);
 
-      return new RuleClass(name, skylarkExecutable, documented, publicByDefault, binaryOutput,
-          workspaceOnly, outputsDefaultExecutable, implicitOutputsFunction, configurator,
-          configuredTargetFactory, validityPredicate, preferredDependencyPredicate,
+      return new RuleClass(name, skylark, skylarkExecutable, documented, publicByDefault,
+          binaryOutput, workspaceOnly, outputsDefaultExecutable, implicitOutputsFunction,
+          configurator, configuredTargetFactory, validityPredicate, preferredDependencyPredicate,
           ImmutableSet.copyOf(advertisedProviders), configuredTargetFunction,
           externalBindingsFunction, ruleDefinitionEnvironment, configurationFragmentPolicy.build(),
           supportsConstraintChecking, attributes.values().toArray(new Attribute[0]));
     }
 
     /**
-     * Declares that the implementation of this rule class requires the given configuration
-     * fragments to be present in the configuration. The value is inherited by subclasses.
+     * Declares that the implementation of the associated rule class requires the given
+     * fragments to be present in this rule's host and target configurations.
      *
-     * <p>For backwards compatibility, if the set is empty, all fragments may be accessed. But note
-     * that this is only enforced in the {@link com.google.devtools.build.lib.analysis.RuleContext}
-     * class.
+     * <p>The value is inherited by subclasses.
      */
     public Builder requiresConfigurationFragments(Class<?>... configurationFragments) {
       configurationFragmentPolicy.requiresConfigurationFragments(configurationFragments);
+      return this;
+    }
+
+    /**
+     * Declares that the implementation of the associated rule class requires the given
+     * fragments to be present in the host configuration.
+     *
+     * <p>The value is inherited by subclasses.
+     */
+    public Builder requiresHostConfigurationFragments(Class<?>... configurationFragments) {
+      configurationFragmentPolicy
+          .requiresConfigurationFragments(ConfigurationTransition.HOST, configurationFragments);
+      return this;
+    }
+
+    /**
+     * Declares the configuration fragments that are required by this rule for the specified
+     * configuration. Valid transition values are HOST for the host configuration and NONE for
+     * the target configuration.
+     *
+     * <p>In contrast to {@link #requiresConfigurationFragments(Class...)}, this method takes the
+     * names of fragments instead of their classes.
+     */
+    public Builder requiresConfigurationFragments(
+        FragmentClassNameResolver fragmentNameResolver,
+        Map<ConfigurationTransition, ImmutableSet<String>> configurationFragmentNames) {
+      configurationFragmentPolicy.requiresConfigurationFragments(
+          fragmentNameResolver, configurationFragmentNames);
       return this;
     }
 
@@ -590,21 +616,6 @@ public final class RuleClass {
      */
     public Builder setMissingFragmentPolicy(MissingFragmentPolicy missingFragmentPolicy) {
       configurationFragmentPolicy.setMissingFragmentPolicy(missingFragmentPolicy);
-      return this;
-    }
-
-    /**
-     * Declares the configuration fragments that are required by this rule.
-     *
-     * <p>In contrast to {@link #requiresConfigurationFragments(Class...)}, this method a) takes the
-     * names of fragments instead of their classes and b) distinguishes whether the fragments can be
-     * accessed in host (HOST) or target (NONE) configuration.
-     */
-    public Builder requiresConfigurationFragments(
-        FragmentClassNameResolver fragmentNameResolver,
-        Map<ConfigurationTransition, ImmutableSet<String>> configurationFragmentNames) {
-      configurationFragmentPolicy.requiresConfigurationFragments(
-          fragmentNameResolver, configurationFragmentNames);
       return this;
     }
 
@@ -883,6 +894,7 @@ public final class RuleClass {
    */
   private final String targetKind;
 
+  private final boolean isSkylark;
   private final boolean skylarkExecutable;
   private final boolean documented;
   private final boolean publicByDefault;
@@ -894,7 +906,7 @@ public final class RuleClass {
    * A (unordered) mapping from attribute names to small integers indexing into
    * the {@code attributes} array.
    */
-  private final Map<String, Integer> attributeIndex = new HashMap<>();
+  private final Map<String, Integer> attributeIndex;
 
   /**
    *  All attributes of this rule class (including inherited ones) ordered by
@@ -963,7 +975,7 @@ public final class RuleClass {
   private final boolean supportsConstraintChecking;
 
   /**
-   * Helper constructor that skips allowedConfigurationFragmentNames and fragmentNameResolver
+   * Helper constructor that skips allowedConfigurationFragmentNames and fragmentNameResolver.
    */
   @VisibleForTesting
   RuleClass(String name,
@@ -987,6 +999,7 @@ public final class RuleClass {
       boolean supportsConstraintChecking,
       Attribute... attributes) {
     this(name,
+        /*isSkylark=*/ skylarkExecutable,
         skylarkExecutable,
         documented,
         publicByDefault,
@@ -1034,7 +1047,7 @@ public final class RuleClass {
    */
   @VisibleForTesting
   RuleClass(String name,
-      boolean skylarkExecutable, boolean documented, boolean publicByDefault,
+      boolean isSkylark, boolean skylarkExecutable, boolean documented, boolean publicByDefault,
       boolean binaryOutput, boolean workspaceOnly, boolean outputsDefaultExecutable,
       ImplicitOutputsFunction implicitOutputsFunction,
       Configurator<?, ?> configurator,
@@ -1048,6 +1061,7 @@ public final class RuleClass {
       boolean supportsConstraintChecking,
       Attribute... attributes) {
     this.name = name;
+    this.isSkylark = isSkylark;
     this.targetKind = name + " rule";
     this.skylarkExecutable = skylarkExecutable;
     this.documented = documented;
@@ -1070,6 +1084,7 @@ public final class RuleClass {
 
     // create the index:
     int index = 0;
+    attributeIndex = new HashMap<>(attributes.length);
     for (Attribute attribute : attributes) {
       attributeIndex.put(attribute.getName(), index++);
     }
@@ -1149,10 +1164,12 @@ public final class RuleClass {
   }
 
   /**
-   * Returns the attribute whose name is 'attrName'; fails if not found.
+   * Returns the attribute whose name is 'attrName'; fails with NullPointerException if not found.
    */
   public Attribute getAttributeByName(String attrName) {
-    return attributes.get(getAttributeIndex(attrName));
+    Integer attrIndex = Preconditions.checkNotNull(getAttributeIndex(attrName),
+        "Attribute %s does not exist", attrName);
+    return attributes.get(attrIndex);
   }
 
   /**
@@ -1608,6 +1625,11 @@ public final class RuleClass {
    */
   @Nullable public Environment getRuleDefinitionEnvironment() {
     return ruleDefinitionEnvironment;
+  }
+
+  /** Returns true if this RuleClass is a skylark-defined RuleClass. */
+  public boolean isSkylark() {
+    return isSkylark;
   }
 
   /**

@@ -21,14 +21,24 @@
 
 set -eu
 
-OUTZIP=$(tools/objc/realpath "$1")
+REALPATH="$0.runfiles/external/bazel_tools/tools/objc/realpath"
+if [ ! -e $REALPATH ]; then
+  REALPATH=tools/objc/realpath
+fi
+
+OUTZIP=$($REALPATH "$1")
 shift 1
 TEMPDIR=$(mktemp -d -t swiftstdlibtoolZippingOutput)
 trap "rm -rf \"$TEMPDIR\"" EXIT
 
 FULLPATH="$TEMPDIR/Frameworks"
 
-/usr/bin/xcrun swift-stdlib-tool --copy --verbose --destination "$FULLPATH" "$@"
+WRAPPER="$0.runfiles/external/bazel_tools/tools/objc/xcrunwrapper.sh"
+if [ ! -e $WRAPPER ]; then
+  WRAPPER=tools/objc/xcrunwrapper.sh
+fi
+
+$WRAPPER swift-stdlib-tool --copy --verbose --destination "$FULLPATH" "$@"
 
 # Need to push/pop tempdir so it isn't the current working directory
 # when we remove it via the EXIT trap.
@@ -39,5 +49,5 @@ find . -exec touch -h -t 198001010000 {} \;
 
 # Added include "*" to fix case where we may want an empty zip file because
 # there is no data.
-zip --symlinks --recurse-paths --quiet "$OUTZIP" . --include "*"
+zip --compression-method store --symlinks --recurse-paths --quiet "$OUTZIP" . --include "*"
 popd > /dev/null

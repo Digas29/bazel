@@ -20,7 +20,6 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Range;
 import com.google.common.eventbus.EventBus;
 import com.google.devtools.build.lib.actions.PackageRootResolver;
 import com.google.devtools.build.lib.actions.cache.ActionCache;
@@ -33,6 +32,7 @@ import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.DefaultsPackage;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
 import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.Reporter;
 import com.google.devtools.build.lib.exec.OutputService;
 import com.google.devtools.build.lib.packages.NoSuchThingException;
@@ -41,6 +41,7 @@ import com.google.devtools.build.lib.pkgcache.LoadingPhaseRunner;
 import com.google.devtools.build.lib.pkgcache.PackageCacheOptions;
 import com.google.devtools.build.lib.pkgcache.PackageManager;
 import com.google.devtools.build.lib.pkgcache.TargetPatternEvaluator;
+import com.google.devtools.build.lib.pkgcache.TransitivePackageLoader;
 import com.google.devtools.build.lib.profiler.AutoProfiler;
 import com.google.devtools.build.lib.profiler.ProfilerTask;
 import com.google.devtools.build.lib.skyframe.SkyframeExecutor;
@@ -59,17 +60,18 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
-
-import javax.annotation.Nullable;
 
 /**
  * Encapsulates the state needed for a single command. The environment is dropped when the current
  * command is done and all corresponding objects are garbage collected.
  */
 public final class CommandEnvironment {
+  private static final boolean USE_SKYFRAME_LOADING_PHASE = false;
+
   private final BlazeRuntime runtime;
 
   private final UUID commandId;  // Unique identifier for the command being run
@@ -104,17 +106,15 @@ public final class CommandEnvironment {
     }
   }
 
-  public CommandEnvironment(BlazeRuntime runtime, UUID commandId, Reporter reporter,
-      EventBus eventBus) {
+  public CommandEnvironment(BlazeRuntime runtime, UUID commandId, EventBus eventBus) {
     this.runtime = runtime;
     this.commandId = commandId;
-    this.reporter = reporter == null ? new Reporter() : reporter;
+    this.reporter = new Reporter();
     this.eventBus = eventBus;
     this.blazeModuleEnvironment = new BlazeModuleEnvironment();
 
-    this.loadingPhaseRunner = new LoadingPhaseRunner(
-        runtime.getSkyframeExecutor().getPackageManager(),
-        runtime.getPackageFactory().getRuleClassNames());
+    this.loadingPhaseRunner = runtime.getSkyframeExecutor().getLoadingPhaseRunner(
+        runtime.getPackageFactory().getRuleClassNames(), USE_SKYFRAME_LOADING_PHASE);
     this.view = new BuildView(runtime.getDirectories(), runtime.getRuleClassProvider(),
         runtime.getSkyframeExecutor(), runtime.getCoverageReportActionFactory());
 
@@ -233,7 +233,7 @@ public final class CommandEnvironment {
     BuildOptions buildOptions = runtime.createBuildOptions(optionsProvider);
     boolean keepGoing = optionsProvider.getOptions(BuildView.Options.class).keepGoing;
     boolean loadingSuccessful =
-        loadingPhaseRunner.loadForConfigurations(reporter,
+        loadForConfigurations(reporter,
             ImmutableSet.copyOf(buildOptions.getAllLabels().values()),
             keepGoing);
     if (!loadingSuccessful) {
@@ -241,6 +241,20 @@ public final class CommandEnvironment {
     }
     return getSkyframeExecutor().createConfigurations(reporter, runtime.getConfigurationFactory(),
         buildOptions, runtime.getDirectories(), ImmutableSet.<String>of(), keepGoing);
+  }
+
+  // TODO(ulfjack): Do we even need this method? With Skyframe, the config creation should
+  // implicitly trigger any necessary loading.
+  private boolean loadForConfigurations(EventHandler eventHandler,
+      Set<Label> labelsToLoad, boolean keepGoing) throws InterruptedException {
+    // Use a new Label Visitor here to avoid erasing the cache on the existing one.
+    TransitivePackageLoader transitivePackageLoader =
+        runtime.getSkyframeExecutor().getPackageManager().newTransitiveLoader();
+    boolean loadingSuccessful = transitivePackageLoader.sync(
+        eventHandler, ImmutableSet.<Target>of(),
+        labelsToLoad, keepGoing, /*parallelThreads=*/10,
+        /*maxDepth=*/Integer.MAX_VALUE);
+    return loadingSuccessful;
   }
 
   /**
@@ -339,9 +353,7 @@ public final class CommandEnvironment {
     }
 
     SkyframeExecutor skyframeExecutor = getSkyframeExecutor();
-    skyframeExecutor.setBatchStatter(outputService == null
-        ? null
-        : outputService.getBatchStatter());
+    skyframeExecutor.setOutputService(outputService);
 
     this.outputFileSystem = determineOutputFileSystem();
 

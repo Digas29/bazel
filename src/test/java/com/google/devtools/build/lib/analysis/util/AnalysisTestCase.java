@@ -42,8 +42,10 @@ import com.google.devtools.build.lib.packages.PackageFactory;
 import com.google.devtools.build.lib.packages.Preprocessor;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.packages.util.MockToolsConfig;
+import com.google.devtools.build.lib.pkgcache.LegacyLoadingPhaseRunner;
+import com.google.devtools.build.lib.pkgcache.LoadingOptions;
 import com.google.devtools.build.lib.pkgcache.LoadingPhaseRunner;
-import com.google.devtools.build.lib.pkgcache.LoadingPhaseRunner.LoadingResult;
+import com.google.devtools.build.lib.pkgcache.LoadingResult;
 import com.google.devtools.build.lib.pkgcache.PackageCacheOptions;
 import com.google.devtools.build.lib.pkgcache.PackageManager;
 import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
@@ -66,7 +68,6 @@ import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.common.options.Options;
 import com.google.devtools.common.options.OptionsParser;
 
-import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
@@ -130,8 +131,8 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
   @Override
   protected void setUp() throws Exception {
     super.setUp();
-    analysisMock = getAnalysisMock();
-    pkgLocator = new PathPackageLocator(rootDirectory);
+    analysisMock = AnalysisMock.get();
+    pkgLocator = new PathPackageLocator(outputBase, ImmutableList.of(rootDirectory));
     directories = new BlazeDirectories(outputBase, outputBase, rootDirectory);
     workspaceStatusActionFactory =
         new AnalysisTestUtil.DummyWorkspaceStatusActionFactory(directories);
@@ -142,16 +143,6 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
     configurationFactory = analysisMock.createConfigurationFactory();
 
     useRuleClassProvider(TestRuleClassProvider.getRuleClassProvider());
-  }
-
-  protected AnalysisMock getAnalysisMock() {
-    try {
-      Class<?> providerClass = Class.forName(TestConstants.TEST_ANALYSIS_MOCK);
-      Field instanceField = providerClass.getField("INSTANCE");
-      return (AnalysisMock) instanceField.get(null);
-    } catch (Exception e) {
-      throw new IllegalStateException(e);
-    }
   }
 
   /**
@@ -181,7 +172,8 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
         Options.getDefaults(PackageCacheOptions.class).defaultVisibility, true,
         3, ruleClassProvider.getDefaultsPackageContent(), UUID.randomUUID());
     packageManager = skyframeExecutor.getPackageManager();
-    loadingPhaseRunner = new LoadingPhaseRunner(packageManager, pkgFactory.getRuleClassNames());
+    loadingPhaseRunner =
+        new LegacyLoadingPhaseRunner(packageManager, pkgFactory.getRuleClassNames());
     buildView = new BuildView(directories, ruleClassProvider, skyframeExecutor, null);
     useConfiguration();
   }
@@ -240,8 +232,7 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
   protected void update(EventBus eventBus, FlagBuilder config, String... labels) throws Exception {
     Set<Flag> flags = config.flags;
 
-    LoadingPhaseRunner.Options loadingOptions =
-        Options.getDefaults(LoadingPhaseRunner.Options.class);
+    LoadingOptions loadingOptions = Options.getDefaults(LoadingOptions.class);
     loadingOptions.loadingPhaseThreads = LOADING_PHASE_THREADS;
 
     BuildView.Options viewOptions = optionsParser.getOptions(BuildView.Options.class);

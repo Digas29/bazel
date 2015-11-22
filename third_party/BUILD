@@ -110,7 +110,17 @@ java_import(
 
 java_import(
     name = "asm",
-    jars = ["asm/asm-5.0.3.jar"],
+    jars = ["asm/asm-5.0.4.jar"],
+)
+
+java_import(
+    name = "asm-commons",
+    jars = ["asm/asm-commons-5.0.4.jar"],
+)
+
+java_import(
+    name = "asm-util",
+    jars = ["asm/asm-util-5.0.4.jar"],
 )
 
 java_plugin(
@@ -183,6 +193,16 @@ java_import(
 )
 
 java_import(
+    name = "bytebuddy",
+    jars = ["bytebuddy/byte-buddy-dep-0.7-rc6.jar"],
+    deps = [
+        ":asm",
+        ":asm-commons",
+        ":asm-util",
+    ],
+)
+
+java_import(
     name = "gson",
     jars = ["gson/gson-2.2.4.jar"],
 )
@@ -243,6 +263,11 @@ java_import(
 java_import(
     name = "joda_time",
     jars = ["joda_time/joda-time-2.3.jar"],
+)
+
+java_import(
+    name = "jsch",
+    jars = ["jsch/jsch-0.1.51.jar"],
 )
 
 java_import(

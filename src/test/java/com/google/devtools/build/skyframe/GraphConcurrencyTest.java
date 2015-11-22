@@ -48,8 +48,8 @@ import java.util.concurrent.TimeUnit;
 public abstract class GraphConcurrencyTest {
 
   private static final SkyFunctionName SKY_FUNCTION_NAME = SkyFunctionName.FOR_TESTING;
-  private ProcessableGraph graph;
-  private TestRunnableWrapper wrapper;
+  protected ProcessableGraph graph;
+  protected TestRunnableWrapper wrapper;
 
   // This code should really be in a @Before method, but @Before methods are executed from the
   // top down, and this class's @Before method calls #getGraph, so makeGraph must have already
@@ -67,7 +67,7 @@ public abstract class GraphConcurrencyTest {
     this.wrapper = new TestRunnableWrapper("GraphConcurrencyTest");
   }
 
-  private SkyKey key(String name) {
+  protected SkyKey key(String name) {
     return new SkyKey(SKY_FUNCTION_NAME, name);
   }
 
@@ -123,6 +123,11 @@ public abstract class GraphConcurrencyTest {
     ExecutorService pool = Executors.newFixedThreadPool(numThreads);
     // Add single rdep before transition to done.
     assertEquals(DependencyState.NEEDS_SCHEDULING, entry.addReverseDepAndCheckIfDone(key("rdep")));
+    List<SkyKey> rdepKeys = new ArrayList<>();
+    for (int i = 0; i < numKeys; i++) {
+      rdepKeys.add(key("rdep" + i));
+    }
+    graph.createIfAbsentBatch(rdepKeys);
     for (int i = 0; i < numKeys; i++) {
       final int j = i;
       Runnable r =
@@ -130,14 +135,7 @@ public abstract class GraphConcurrencyTest {
             @Override
             public void run() {
               try {
-                // Add and remove the rdep a bunch of times to test interleaving.
                 waitForStart.await(TestUtils.WAIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                for (int k = 1; k < chunkSize; k++) {
-                  assertThat(entry.addReverseDepAndCheckIfDone(key("rdep" + j)))
-                      .isNotEqualTo(DependencyState.DONE);
-                  entry.removeInProgressReverseDep(key("rdep" + j));
-                  assertThat(entry.getInProgressReverseDeps()).doesNotContain(key("rdep" + j));
-                }
                 assertThat(entry.addReverseDepAndCheckIfDone(key("rdep" + j)))
                     .isNotEqualTo(DependencyState.DONE);
                 waitForAddedRdep.countDown();
@@ -158,11 +156,10 @@ public abstract class GraphConcurrencyTest {
     waitForAddedRdep.await(TestUtils.WAIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
     entry.setValue(new StringValue("foo1"), startingVersion);
     waitForSetValue.countDown();
-    entry.removeReverseDep(key("rdep"));
     wrapper.waitForTasksAndMaybeThrow();
     assertFalse(ExecutorUtil.interruptibleShutdown(pool));
     assertEquals(new StringValue("foo1"), graph.get(key).getValue());
-    assertEquals(numKeys, Iterables.size(graph.get(key).getReverseDeps()));
+    assertEquals(numKeys + 1, Iterables.size(graph.get(key).getReverseDeps()));
 
     graph = getGraph(startingVersion.next());
     NodeEntry sameEntry = Preconditions.checkNotNull(graph.get(key));
@@ -172,7 +169,7 @@ public abstract class GraphConcurrencyTest {
     sameEntry.markRebuildingAndGetAllRemainingDirtyDirectDeps();
     sameEntry.setValue(new StringValue("foo2"), startingVersion.next());
     assertEquals(new StringValue("foo2"), graph.get(key).getValue());
-    assertEquals(numKeys, Iterables.size(graph.get(key).getReverseDeps()));
+    assertEquals(numKeys + 1, Iterables.size(graph.get(key).getReverseDeps()));
   }
 
   // Tests adding inflight nodes with a given key while an existing node with the same key

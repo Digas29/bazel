@@ -22,6 +22,7 @@ import com.google.devtools.build.lib.syntax.Mutability.Freezable;
 import com.google.devtools.build.lib.syntax.Mutability.MutabilityException;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
@@ -213,7 +214,7 @@ public abstract class SkylarkList implements Iterable<Object>, SkylarkValue {
     }
 
     /**
-     * Creates a MutableList from contents and an Environment.
+     * Creates a MutableList from contents.
      * @param contents the contents of the list
      * @return an actually immutable MutableList containing the elements
      */
@@ -222,12 +223,19 @@ public abstract class SkylarkList implements Iterable<Object>, SkylarkValue {
     }
 
     /**
+     * Creates a mutable or immutable MutableList depending on the given {@link Mutability}.
+     */
+    public MutableList(Mutability mutability) {
+      this(Collections.EMPTY_LIST, mutability);
+    }
+
+    /**
      * Builds a Skylark list (actually immutable) from a variable number of arguments.
      * @param env an Environment from which to inherit Mutability, or null for immutable
      * @param contents the contents of the list
      * @return a Skylark list containing the specified arguments as elements.
      */
-    public static MutableList of(Environment env, Object... contents) {
+    public static MutableList of(@Nullable Environment env, Object... contents) {
       return new MutableList(ImmutableList.copyOf(contents), env);
     }
 
@@ -395,7 +403,8 @@ public abstract class SkylarkList implements Iterable<Object>, SkylarkValue {
      * Creates a Tuple from an Iterable.
      */
     public static Tuple copyOf(Iterable<?> contents) {
-      return create(ImmutableList.copyOf(contents));
+      // Do not remove <Object>: workaround for Java 7 type inference.
+      return create(ImmutableList.<Object>copyOf(contents));
     }
 
     /**

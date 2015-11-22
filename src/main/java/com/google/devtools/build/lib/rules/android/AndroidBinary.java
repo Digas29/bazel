@@ -55,6 +55,8 @@ import com.google.devtools.build.lib.rules.cpp.CppHelper;
 import com.google.devtools.build.lib.rules.java.DeployArchiveBuilder;
 import com.google.devtools.build.lib.rules.java.JavaCommon;
 import com.google.devtools.build.lib.rules.java.JavaCompilationArgsProvider;
+import com.google.devtools.build.lib.rules.java.JavaConfiguration;
+import com.google.devtools.build.lib.rules.java.JavaConfiguration.JavaOptimizationMode;
 import com.google.devtools.build.lib.rules.java.JavaSemantics;
 import com.google.devtools.build.lib.rules.java.JavaSourceInfoProvider;
 import com.google.devtools.build.lib.rules.java.JavaTargetAttributes;
@@ -94,12 +96,12 @@ public abstract class AndroidBinary implements RuleConfiguredTargetFactory {
         ruleContext, javaSemantics, deps, deps, deps);
 
     AndroidCommon androidCommon = new AndroidCommon(
-        ruleContext, javaCommon, true /* asNeverLink */, true /* exportDeps */);
+        javaCommon, true /* asNeverLink */, true /* exportDeps */);
     try {
       ResourceDependencies resourceDeps = LocalResourceContainer.definesAndroidResources(
           ruleContext.attributes())
-          ? ResourceDependencies.fromRuleDeps(ruleContext)
-          : ResourceDependencies.fromRuleResourceAndDeps(ruleContext);
+          ? ResourceDependencies.fromRuleDeps(ruleContext, false /* neverlink */)
+          : ResourceDependencies.fromRuleResourceAndDeps(ruleContext, false /* neverlink */);
       RuleConfiguredTargetBuilder builder = init(
           ruleContext,
           filesBuilder,
@@ -135,6 +137,13 @@ public abstract class AndroidBinary implements RuleConfiguredTargetFactory {
             "main_dex_proguard_specs")) {
       ruleContext.attributeError("main_dex_proguard_specs", "The 'main_dex_proguard_specs' "
           + "attribute is only allowed if 'multidex' is set to 'legacy'");
+      return null;
+    }
+
+    if (ruleContext.attributes().isAttributeValueExplicitlySpecified("proguard_apply_mapping")
+        && ruleContext.attributes().get(PROGUARD_SPECS, BuildType.LABEL_LIST).isEmpty()) {
+      ruleContext.attributeError("proguard_apply_mapping",
+          "'proguard_apply_mapping' can only be used when 'proguard_specs' is also set");
       return null;
     }
 
@@ -281,6 +290,9 @@ public abstract class AndroidBinary implements RuleConfiguredTargetFactory {
     Artifact deployJar = createDeployJar(ruleContext, javaSemantics, androidCommon, resourceClasses,
         ruleContext.getImplicitOutputArtifact(AndroidRuleClasses.ANDROID_BINARY_DEPLOY_JAR));
 
+    Artifact proguardMapping = ruleContext.getPrerequisiteArtifact(
+        "proguard_apply_mapping", Mode.TARGET);
+
 
     return createAndroidBinary(
         ruleContext,
@@ -297,7 +309,7 @@ public abstract class AndroidBinary implements RuleConfiguredTargetFactory {
         splitResourceApk,
         resourceClasses,
         ImmutableList.<Artifact>of(),
-        null);
+        proguardMapping);
   }
 
 
@@ -317,12 +329,7 @@ public abstract class AndroidBinary implements RuleConfiguredTargetFactory {
       JavaTargetAttributes resourceClasses,
       ImmutableList<Artifact> apksUnderTest,
       Artifact proguardMapping) throws InterruptedException {
-
-    ImmutableList<Artifact> proguardSpecs =
-        getTransitiveProguardSpecs(
-            ruleContext,
-            resourceApk,
-            ruleContext.getPrerequisiteArtifacts(PROGUARD_SPECS, Mode.TARGET).list());
+    ImmutableList<Artifact> proguardSpecs = getTransitiveProguardSpecs(ruleContext, resourceApk);
 
     ProguardOutput proguardOutput =
         applyProguard(
@@ -717,15 +724,25 @@ public abstract class AndroidBinary implements RuleConfiguredTargetFactory {
   /**
    * Retrieves the full set of proguard specs that should be applied to this binary.
    *
-   * <p>If an empty list is passed (i.e., there are no proguardSpecs on this rule), an empty list
-   * will be returned, regardless of any specs from dependencies or the resourceApk.
+   * <p>If Proguard shouldn't be applied, or the legacy link mode is used and there are no
+   * proguard_specs on this rule, an empty list will be returned, regardless of any specs from
+   * dependencies or the resourceApk.
    */
   private static ImmutableList<Artifact> getTransitiveProguardSpecs(
-      RuleContext ruleContext, ResourceApk resourceApk, ImmutableList<Artifact> proguardSpecs) {
-    if (proguardSpecs.isEmpty()) {
-      return proguardSpecs;
+      RuleContext ruleContext, ResourceApk resourceApk) {
+    JavaOptimizationMode optMode = getJavaOptimizationMode(ruleContext);
+    if (optMode == JavaOptimizationMode.NOOP) {
+      return ImmutableList.of();
     }
 
+    ImmutableList<Artifact> proguardSpecs =
+        ruleContext.getPrerequisiteArtifacts(PROGUARD_SPECS, Mode.TARGET).list();
+    if (optMode == JavaOptimizationMode.LEGACY && proguardSpecs.isEmpty()) {
+      return ImmutableList.of();
+    }
+
+    // TODO(kmb): In modes other than LEGACY verify that proguard specs don't include -dont... flags
+    // since those flags would override the desired optMode (b/25621573)
     ImmutableSortedSet.Builder<Artifact> builder =
         ImmutableSortedSet.<Artifact>orderedBy(Artifact.EXEC_PATH_COMPARATOR).addAll(proguardSpecs);
     for (ProguardSpecProvider dep :
@@ -735,6 +752,11 @@ public abstract class AndroidBinary implements RuleConfiguredTargetFactory {
     Artifact output = resourceApk.getResourceProguardConfig();
     builder.add(output);
     return builder.build().asList();
+  }
+
+  private static JavaOptimizationMode getJavaOptimizationMode(RuleContext ruleContext) {
+    return ruleContext.getConfiguration().getFragment(JavaConfiguration.class)
+        .getJavaOptimizationMode();
   }
 
   /** Applies the proguard specifications, and creates a ProguardedJar. */
@@ -771,11 +793,15 @@ public abstract class AndroidBinary implements RuleConfiguredTargetFactory {
       failures.add(
           ruleContext.getImplicitOutputArtifact(AndroidRuleClasses.ANDROID_BINARY_PROGUARD_MAP));
     }
+    JavaOptimizationMode optMode = getJavaOptimizationMode(ruleContext);
     ruleContext.registerAction(
         new FailAction(
             ruleContext.getActionOwner(),
             failures.build(),
-            "Can't generate Proguard jar or mapping without proguard_specs."));
+            String.format("Can't generate Proguard jar or mapping %s.",
+                optMode == JavaOptimizationMode.LEGACY
+                    ? "without proguard_specs"
+                    : "in optimization mode " + optMode)));
     return new ProguardOutput(deployJarArtifact, null);
   }
 
@@ -813,22 +839,26 @@ public abstract class AndroidBinary implements RuleConfiguredTargetFactory {
           .addArgument(proguardMapping.getExecPathString());
     }
 
+    builder.addArgument("-outjars")
+        .addArgument(proguardOutputJar.getExecPathString());
+
+    for (Artifact proguardSpec : proguardSpecs) {
+      builder.addArgument("@" + proguardSpec.getExecPathString());
+    }
+
     Artifact proguardOutputMap = null;
-    if (ruleContext.attributes().get("proguard_generate_mapping", Type.BOOLEAN)) {
-       proguardOutputMap = ruleContext.getImplicitOutputArtifact(
+    JavaOptimizationMode optMode = getJavaOptimizationMode(ruleContext);
+    if (ruleContext.attributes().get("proguard_generate_mapping", Type.BOOLEAN)
+        || optMode.alwaysGenerateOutputMapping()) {
+      // TODO(kmb): Verify that proguard spec files don't contain -printmapping directions which
+      // this -printmapping command line flag will override.
+      proguardOutputMap = ruleContext.getImplicitOutputArtifact(
           AndroidRuleClasses.ANDROID_BINARY_PROGUARD_MAP);
 
       builder.addOutput(proguardOutputMap)
           .addArgument("-printmapping")
           .addArgument(proguardOutputMap.getExecPathString());
       filesBuilder.add(proguardOutputMap);
-    }
-
-    builder.addArgument("-outjars")
-        .addArgument(proguardOutputJar.getExecPathString());
-
-    for (Artifact proguardSpec : proguardSpecs) {
-      builder.addArgument("@" + proguardSpec.getExecPathString());
     }
 
     ruleContext.registerAction(builder.build(ruleContext));

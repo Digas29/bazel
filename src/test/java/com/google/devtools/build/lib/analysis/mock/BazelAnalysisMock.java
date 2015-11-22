@@ -18,38 +18,29 @@ import static com.google.devtools.build.lib.packages.BuildType.LABEL;
 import com.google.common.base.Functions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableList.Builder;
-import com.google.common.collect.ImmutableMap;
 import com.google.common.io.ByteStreams;
-import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.ConfigurationCollectionFactory;
 import com.google.devtools.build.lib.analysis.config.ConfigurationFactory;
 import com.google.devtools.build.lib.analysis.config.FragmentOptions;
 import com.google.devtools.build.lib.analysis.util.AnalysisMock;
-import com.google.devtools.build.lib.bazel.repository.LocalRepositoryFunction;
-import com.google.devtools.build.lib.bazel.repository.RepositoryDelegatorFunction;
-import com.google.devtools.build.lib.bazel.repository.RepositoryFunction;
 import com.google.devtools.build.lib.bazel.rules.BazelConfiguration;
 import com.google.devtools.build.lib.bazel.rules.BazelConfigurationCollection;
 import com.google.devtools.build.lib.bazel.rules.BazelRuleClassProvider;
-import com.google.devtools.build.lib.bazel.rules.android.AndroidRepositoryRules;
 import com.google.devtools.build.lib.bazel.rules.python.BazelPythonConfiguration;
-import com.google.devtools.build.lib.bazel.rules.workspace.LocalRepositoryRule;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.util.MockToolsConfig;
 import com.google.devtools.build.lib.rules.android.AndroidConfiguration;
+import com.google.devtools.build.lib.rules.apple.AppleConfiguration;
 import com.google.devtools.build.lib.rules.cpp.CppConfigurationLoader;
 import com.google.devtools.build.lib.rules.java.J2ObjcConfiguration;
 import com.google.devtools.build.lib.rules.java.JavaConfigurationLoader;
 import com.google.devtools.build.lib.rules.java.JvmConfigurationLoader;
 import com.google.devtools.build.lib.rules.objc.ObjcConfigurationLoader;
 import com.google.devtools.build.lib.rules.python.PythonConfigurationLoader;
-import com.google.devtools.build.lib.skyframe.SkyFunctions;
 import com.google.devtools.build.lib.testutil.TestRuleClassProvider;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
-import com.google.devtools.build.skyframe.SkyFunction;
-import com.google.devtools.build.skyframe.SkyFunctionName;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -57,10 +48,12 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
 
-public class BazelAnalysisMock extends AnalysisMock {
+public final class BazelAnalysisMock extends AnalysisMock {
   public static final AnalysisMock INSTANCE = new BazelAnalysisMock();
+
+  private BazelAnalysisMock() {
+  }
 
   @Override
   public void setupMockClient(MockToolsConfig config) throws IOException {
@@ -77,12 +70,9 @@ public class BazelAnalysisMock extends AnalysisMock {
                 "  name = 'objc_proto_cpp_lib',",
                 "  actual = '//objcproto:ProtocolBuffersCPP_lib',",
                 ")",
-                "bind(name = 'android/sdk', actual='//tools/android:sdk')"));
-    ImmutableList<String> tools = AndroidRepositoryRules.toolsForTesting();
-    for (String tool : tools) {
-      workspaceContents.add(
-          "bind(name = 'android/" + tool + "', actual = '//tools/android:" + tool + "')");
-    }
+                "bind(name = 'android/sdk', actual='//tools/android:sdk')",
+                "bind(name = 'tools/cpp', actual='//tools/cpp')"
+            ));
 
     config.overwrite("WORKSPACE", workspaceContents.toArray(new String[workspaceContents.size()]));
     config.create("tools/jdk/BUILD",
@@ -101,6 +91,7 @@ public class BazelAnalysisMock extends AnalysisMock {
         "               'JavaBuilderCanary_deploy.jar', 'ijar', 'GenClass_deploy.jar'])");
     config.create("tools/cpp/BUILD",
         "cc_library(name = 'stl')",
+        "cc_library(name = 'malloc')",
         "filegroup(name = 'toolchain', ",
         "    srcs = [':cc-compiler-local', ':cc-compiler-darwin', ':cc-compiler-piii',",
         "            ':cc-compiler-armeabi-v7a', ':empty'],",
@@ -128,7 +119,8 @@ public class BazelAnalysisMock extends AnalysisMock {
         "    linker_files = ':empty',",
         "    objcopy_files = ':empty', static_runtime_libs = [':empty'], strip_files = ':empty',",
         ")");
-    config.create("tools/cpp/CROSSTOOL", readFromResources("MOCK_CROSSTOOL"));
+    config.create(
+        "tools/cpp/CROSSTOOL", readFromResources("com/google/devtools/build/lib/MOCK_CROSSTOOL"));
 
     ImmutableList<String> androidBuildContents = createAndroidBuildContents();
     config.create(
@@ -142,8 +134,10 @@ public class BazelAnalysisMock extends AnalysisMock {
         "package(default_visibility=['//visibility:public'])",
         "licenses(['notice'])",
         "java_binary(name = 'jarjar_bin',",
-        "            srcs = [ 'jarjar.jar' ],",
-        "            main_class = 'com.tonicsystems.jarjar.Main')");
+        "            runtime_deps = [ ':jarjar_import' ],",
+        "            main_class = 'com.tonicsystems.jarjar.Main')",
+        "java_import(name = 'jarjar_import',",
+        "            jars = [ 'jarjar.jar' ])");
 
     config.create("tools/test/BUILD", "filegroup(name = 'runtime')");
   }
@@ -199,8 +193,10 @@ public class BazelAnalysisMock extends AnalysisMock {
     }
     androidBuildContents
         .add("java_binary(name = 'IdlClass',")
-        .add("            srcs = [ 'idlclass.jar' ],")
-        .add("            main_class = 'com.google.devtools.build.android.idlclass.IdlClass')");
+        .add("            runtime_deps = [ ':idlclass_import' ],")
+        .add("            main_class = 'com.google.devtools.build.android.idlclass.IdlClass')")
+        .add("java_import(name = 'idlclass_import',")
+        .add("            jars = [ 'idlclass.jar' ])");
 
     return androidBuildContents.build();
   }
@@ -231,6 +227,7 @@ public class BazelAnalysisMock extends AnalysisMock {
         new JvmConfigurationLoader(false, BazelRuleClassProvider.JAVA_CPU_SUPPLIER),
         new JavaConfigurationLoader(),
         new ObjcConfigurationLoader(),
+        new AppleConfiguration.Loader(),
         new J2ObjcConfiguration.Loader(),
         new AndroidConfiguration.Loader());
   }
@@ -248,21 +245,5 @@ public class BazelAnalysisMock extends AnalysisMock {
   @Override
   public ImmutableList<Class<? extends FragmentOptions>> getBuildOptions() {
     return BazelRuleClassProvider.BUILD_OPTIONS;
-  }
-
-  @Override
-  public ImmutableMap<SkyFunctionName, SkyFunction> getSkyFunctions(BlazeDirectories directories) {
-    // Bazel will access tools using a local_repository rule, thus, we need to support those rules
-    // in test cases, too. So we need the appropriate SkyFunctions.
-    RepositoryFunction localRepositoryFunction = new LocalRepositoryFunction();
-    localRepositoryFunction.setDirectories(directories);
-    ImmutableMap<String, RepositoryFunction> repositoryHandlers = ImmutableMap.of(
-        LocalRepositoryRule.NAME, localRepositoryFunction);
-
-    return ImmutableMap.of(
-        SkyFunctions.REPOSITORY,
-        new RepositoryDelegatorFunction(directories, repositoryHandlers, new AtomicBoolean(true)),
-        localRepositoryFunction.getSkyFunctionName(),
-        localRepositoryFunction);
   }
 }

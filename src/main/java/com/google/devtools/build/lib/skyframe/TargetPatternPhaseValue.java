@@ -16,11 +16,15 @@ package com.google.devtools.build.lib.skyframe;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.packages.Target;
+import com.google.devtools.build.lib.pkgcache.LoadingResult;
 import com.google.devtools.build.lib.pkgcache.TestFilter;
+import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
 
@@ -84,6 +88,11 @@ public final class TargetPatternPhaseValue implements SkyValue {
     return testFilteredTargets;
   }
 
+  public LoadingResult toLoadingResult() {
+    return new LoadingResult(hasError(), hasPostExpansionError(), getTargets(), getTestsToRun(),
+        ImmutableMap.<PackageIdentifier, Path>of());
+  }
+
   @SuppressWarnings("unused")
   private void writeObject(ObjectOutputStream out) {
     throw new UnsupportedOperationException();
@@ -101,11 +110,11 @@ public final class TargetPatternPhaseValue implements SkyValue {
 
   /** Create a target pattern phase value key. */
   @ThreadSafe
-  public static SkyKey key(ImmutableList<String> targetPatterns, boolean compileOneDependency,
-      boolean buildTestsOnly, boolean determineTests, TestFilter testFilter) {
-    return new SkyKey(SkyFunctions.TARGET_PATTERN_PHASE,
-        new TargetPatternList(
-            targetPatterns, compileOneDependency, buildTestsOnly, determineTests, testFilter));
+  public static SkyKey key(ImmutableList<String> targetPatterns, String offset,
+      boolean compileOneDependency, boolean buildTestsOnly, boolean determineTests,
+      TestFilter testFilter) {
+    return new SkyKey(SkyFunctions.TARGET_PATTERN_PHASE, new TargetPatternList(
+        targetPatterns, offset, compileOneDependency, buildTestsOnly, determineTests, testFilter));
   }
 
   /**
@@ -115,15 +124,17 @@ public final class TargetPatternPhaseValue implements SkyValue {
   @ThreadSafe
   static final class TargetPatternList implements Serializable {
     private final ImmutableList<String> targetPatterns;
+    private final String offset;
     private final boolean compileOneDependency;
     private final boolean buildTestsOnly;
     private final boolean determineTests;
     private final TestFilter testFilter;
 
-    public TargetPatternList(ImmutableList<String> targetPatterns,
+    public TargetPatternList(ImmutableList<String> targetPatterns, String offset,
         boolean compileOneDependency, boolean buildTestsOnly, boolean determineTests,
         TestFilter testFilter) {
       this.targetPatterns = targetPatterns;
+      this.offset = offset;
       this.compileOneDependency = compileOneDependency;
       this.buildTestsOnly = buildTestsOnly;
       this.determineTests = determineTests;
@@ -132,6 +143,10 @@ public final class TargetPatternPhaseValue implements SkyValue {
 
     public ImmutableList<String> getTargetPatterns() {
       return targetPatterns;
+    }
+
+    public String getOffset() {
+      return offset;
     }
 
     public boolean getCompileOneDependency() {

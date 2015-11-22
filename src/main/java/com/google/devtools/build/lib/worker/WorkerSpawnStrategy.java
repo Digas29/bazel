@@ -13,13 +13,21 @@
 // limitations under the License.
 package com.google.devtools.build.lib.worker;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
+
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.common.eventbus.EventBus;
 import com.google.common.eventbus.Subscribe;
+import com.google.common.hash.HashCode;
+import com.google.common.hash.Hasher;
+import com.google.common.hash.Hashing;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
+import com.google.devtools.build.lib.actions.ActionInput;
+import com.google.devtools.build.lib.actions.ActionInputFileCache;
+import com.google.devtools.build.lib.actions.ActionInputHelper;
 import com.google.devtools.build.lib.actions.ChangedFilesMessage;
 import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.ExecutionStrategy;
@@ -39,7 +47,13 @@ import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.worker.WorkerProtocol.WorkRequest;
 import com.google.devtools.build.lib.worker.WorkerProtocol.WorkResponse;
 import com.google.devtools.common.options.OptionsClassProvider;
+import com.google.protobuf.ByteString;
 
+import java.io.IOException;
+import java.nio.charset.Charset;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -48,9 +62,17 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 @ExecutionStrategy(name = { "worker" }, contextType = SpawnActionContext.class)
 final class WorkerSpawnStrategy implements SpawnActionContext {
+  public static final String REASON_HEURISTIC =
+      "Not using worker strategy, because incrementalHeuristic says no";
+  public static final String REASON_NO_FLAGFILE =
+      "Not using worker strategy, because last argument does not contain a @flagfile";
+  public static final String REASON_NO_TOOLS =
+      "Not using worker strategy, because the action has no tools";
+
   private final WorkerPool workers;
   private final IncrementalHeuristic incrementalHeuristic;
   private final StandaloneSpawnStrategy standaloneStrategy;
+  private final WorkerOptions options;
   private final boolean verboseFailures;
   private final int maxRetries;
 
@@ -62,7 +84,7 @@ final class WorkerSpawnStrategy implements SpawnActionContext {
       boolean verboseFailures,
       int maxRetries) {
     Preconditions.checkNotNull(optionsProvider);
-    WorkerOptions options = optionsProvider.getOptions(WorkerOptions.class);
+    this.options = optionsProvider.getOptions(WorkerOptions.class);
     this.incrementalHeuristic = new IncrementalHeuristic(options.workerMaxChangedFiles);
     eventBus.register(incrementalHeuristic);
     this.workers = Preconditions.checkNotNull(workers);
@@ -75,6 +97,8 @@ final class WorkerSpawnStrategy implements SpawnActionContext {
   public void exec(Spawn spawn, ActionExecutionContext actionExecutionContext)
       throws ExecException, InterruptedException {
     Executor executor = actionExecutionContext.getExecutor();
+    EventHandler eventHandler = executor.getEventHandler();
+
     if (executor.reportsSubcommands()) {
       executor.reportSubcommand(
           Label.print(spawn.getOwner().getLabel())
@@ -85,21 +109,33 @@ final class WorkerSpawnStrategy implements SpawnActionContext {
     }
 
     if (!incrementalHeuristic.shouldUseWorkers()) {
+      if (options.workerVerbose) {
+        eventHandler.handle(Event.info(REASON_HEURISTIC));
+      }
       standaloneStrategy.exec(spawn, actionExecutionContext);
       return;
     }
 
-    // We assume that the spawn to be executed always gets a single argument, which is a flagfile
-    // prefixed with @ and that it will start in persistent mode when we don't pass it one.
-    // Thus, we can extract the last element from its args (which will be the flagfile) to start the
-    // persistent mode and then pass it the flagfile via a WorkRequest to make it actually do the
-    // work.
+    // We assume that the spawn to be executed always gets a @flagfile argument, which contains the
+    // flags related to the work itself (as opposed to start-up options for the executed tool).
+    // Thus, we can extract the last element from its args (which will be the @flagfile), expand it
+    // and put that into the WorkRequest instead.
     if (!Iterables.getLast(spawn.getArguments()).startsWith("@")) {
+      if (options.workerVerbose) {
+        eventHandler.handle(Event.info(REASON_NO_FLAGFILE));
+      }
       standaloneStrategy.exec(spawn, actionExecutionContext);
       return;
     }
 
-    String paramFile = Iterables.getLast(spawn.getArguments());
+    if (Iterables.isEmpty(spawn.getToolFiles())) {
+      if (options.workerVerbose) {
+        eventHandler.handle(Event.info(REASON_NO_TOOLS));
+      }
+      standaloneStrategy.exec(spawn, actionExecutionContext);
+      return;
+    }
+
     FileOutErr outErr = actionExecutionContext.getFileOutErr();
 
     ImmutableList<String> args = ImmutableList.<String>builder()
@@ -108,16 +144,41 @@ final class WorkerSpawnStrategy implements SpawnActionContext {
         .build();
     ImmutableMap<String, String> env = spawn.getEnvironment();
     Path workDir = actionExecutionContext.getExecutor().getExecRoot();
-    WorkerKey key = new WorkerKey(args, env, workDir, spawn.getMnemonic());
 
     try {
-      WorkResponse response = execInWorker(executor.getEventHandler(), paramFile, key, maxRetries);
+      ActionInputFileCache inputFileCache = actionExecutionContext.getActionInputFileCache();
+
+      HashCode workerFilesHash = combineActionInputHashes(spawn.getToolFiles(), inputFileCache);
+      WorkerKey key = new WorkerKey(args, env, workDir, spawn.getMnemonic(), workerFilesHash);
+
+      WorkRequest.Builder requestBuilder = WorkRequest.newBuilder();
+      expandArgument(requestBuilder, Iterables.getLast(spawn.getArguments()));
+
+      List<ActionInput> inputs =
+          ActionInputHelper.expandMiddlemen(
+              spawn.getInputFiles(), actionExecutionContext.getMiddlemanExpander());
+
+      for (ActionInput input : inputs) {
+        ByteString digest = inputFileCache.getDigest(input);
+        if (digest == null) {
+          digest = ByteString.EMPTY;
+        }
+
+        requestBuilder
+            .addInputsBuilder()
+            .setPath(input.getExecPathString())
+            .setDigest(digest)
+            .build();
+      }
+
+      WorkResponse response = execInWorker(eventHandler, key, requestBuilder.build(), maxRetries);
 
       outErr.getErrorStream().write(response.getOutputBytes().toByteArray());
 
       if (response.getExitCode() != 0) {
         throw new UserExecException(
-            String.format("Worker process failed with exit code: %d.", response.getExitCode()));
+            String.format(
+                "Worker process sent response with exit code: %d.", response.getExitCode()));
       }
     } catch (Exception e) {
       String message =
@@ -127,18 +188,46 @@ final class WorkerSpawnStrategy implements SpawnActionContext {
     }
   }
 
+  /**
+   * Recursively expands arguments by replacing @filename args with the contents of the referenced
+   * files. The @ itself can be escaped with @@.
+   *
+   * @param requestBuilder the WorkRequest.Builder that the arguments should be added to.
+   * @param arg the argument to expand.
+   * @throws java.io.IOException if one of the files containing options cannot be read.
+   */
+  private void expandArgument(WorkRequest.Builder requestBuilder, String arg) throws IOException {
+    if (arg.startsWith("@") && !arg.startsWith("@@")) {
+      for (String line : Files.readAllLines(Paths.get(arg.substring(1)), UTF_8)) {
+        if (line.length() > 0) {
+          expandArgument(requestBuilder, line);
+        }
+      }
+    } else {
+      requestBuilder.addArguments(arg);
+    }
+  }
+
+  private HashCode combineActionInputHashes(
+      Iterable<? extends ActionInput> toolFiles, ActionInputFileCache actionInputFileCache)
+      throws IOException {
+    Hasher hasher = Hashing.sha256().newHasher();
+    for (ActionInput tool : toolFiles) {
+      hasher.putString(tool.getExecPathString(), Charset.defaultCharset());
+      hasher.putBytes(actionInputFileCache.getDigest(tool).toByteArray());
+    }
+    return hasher.hash();
+  }
+
   private WorkResponse execInWorker(
-      EventHandler eventHandler, String paramFile, WorkerKey key, int retriesLeft)
+      EventHandler eventHandler, WorkerKey key, WorkRequest request, int retriesLeft)
       throws Exception {
     Worker worker = null;
     WorkResponse response = null;
 
     try {
       worker = workers.borrowObject(key);
-      WorkRequest.newBuilder()
-          .addArguments(paramFile)
-          .build()
-          .writeDelimitedTo(worker.getOutputStream());
+      request.writeDelimitedTo(worker.getOutputStream());
       worker.getOutputStream().flush();
 
       response = WorkResponse.parseDelimitedFrom(worker.getInputStream());
@@ -168,7 +257,7 @@ final class WorkerSpawnStrategy implements SpawnActionContext {
                     + " worker failed ("
                     + e
                     + "), invalidating and retrying with new worker..."));
-        return execInWorker(eventHandler, paramFile, key, retriesLeft - 1);
+        return execInWorker(eventHandler, key, request, retriesLeft - 1);
       } else {
         throw e;
       }

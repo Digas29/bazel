@@ -25,7 +25,12 @@
 
 set -eu
 
-OUTZIP=$(tools/objc/realpath "$1")
+REALPATH="$0.runfiles/external/bazel_tools/tools/objc/realpath"
+if [ ! -e $REALPATH ]; then
+  REALPATH=tools/objc/realpath
+fi
+
+OUTZIP=$($REALPATH "$1")
 ARCHIVEROOT="$2"
 shift 2
 TEMPDIR=$(mktemp -d -t ibtoolZippingOutput)
@@ -34,7 +39,7 @@ trap "rm -rf \"$TEMPDIR\"" EXIT
 FULLPATH="$TEMPDIR/$ARCHIVEROOT"
 PARENTDIR=$(dirname "$FULLPATH")
 mkdir -p "$PARENTDIR"
-FULLPATH=$(tools/objc/realpath "$FULLPATH")
+FULLPATH=$($REALPATH "$FULLPATH")
 
 # IBTool needs to have absolute paths sent to it, so we call realpaths on
 # on all arguments seeing if we can expand them.
@@ -42,12 +47,17 @@ FULLPATH=$(tools/objc/realpath "$FULLPATH")
 TOOLARGS=()
 for i in $@; do
   if [ -e "$i" ]; then
-    ARG=$(tools/objc/realpath "$i")
+    ARG=$($REALPATH "$i")
     TOOLARGS+=("$ARG")
   else
     TOOLARGS+=("$i")
   fi
 done
+
+WRAPPER="$0.runfiles/external/bazel_tools/tools/objc/xcrunwrapper.sh"
+if [ ! -e $WRAPPER ]; then
+  WRAPPER=tools/objc/xcrunwrapper.sh
+fi
 
 # If we are running into problems figuring out ibtool issues, there are a couple
 # of env variables that may help. Both of the following must be set to work.
@@ -56,7 +66,7 @@ done
 # you may also see if
 #   IBToolNeverDeque=1
 # helps.
-/usr/bin/xcrun ibtool --errors --warnings --notices \
+$WRAPPER ibtool --errors --warnings --notices \
     --auto-activate-custom-fonts --output-format human-readable-text \
     --compile "$FULLPATH" "${TOOLARGS[@]}"
 
@@ -69,5 +79,5 @@ find . -exec touch -h -t 198001010000 {} \;
 
 # Added include "*" to fix case where we may want an empty zip file because
 # there is no data.
-zip --symlinks --recurse-paths --quiet "$OUTZIP" . --include "*"
+zip --compression-method store --symlinks --recurse-paths --quiet "$OUTZIP" . --include "*"
 popd > /dev/null

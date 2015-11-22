@@ -40,11 +40,13 @@ import java.util.Set;
 public class BuildConfigurationFunction implements SkyFunction {
 
   private final BlazeDirectories directories;
+  private final RuleClassProvider ruleClassProvider;
   private final ConfigurationCollectionFactory collectionFactory;
 
   public BuildConfigurationFunction(BlazeDirectories directories,
       RuleClassProvider ruleClassProvider) {
     this.directories = directories;
+    this.ruleClassProvider = ruleClassProvider;
     collectionFactory =
         ((ConfiguredRuleClassProvider) ruleClassProvider).getConfigurationCollectionFactory();
   }
@@ -87,7 +89,8 @@ public class BuildConfigurationFunction implements SkyFunction {
     // Get SkyKeys for the fragments we need to load.
     Set<SkyKey> fragmentKeys = new LinkedHashSet<>();
     for (Class<? extends BuildConfiguration.Fragment> fragmentClass : key.getFragments()) {
-      fragmentKeys.add(ConfigurationFragmentValue.key(key.getBuildOptions(), fragmentClass));
+      fragmentKeys.add(
+          ConfigurationFragmentValue.key(key.getBuildOptions(), fragmentClass, ruleClassProvider));
     }
 
     // Load them as Skyframe deps.

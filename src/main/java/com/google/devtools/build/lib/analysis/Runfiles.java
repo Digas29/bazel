@@ -361,17 +361,17 @@ public final class Runfiles {
       for (Artifact artifact : pruningManifest.getCandidateRunfiles()) {
         allowedRunfiles.put(artifact.getRootRelativePath().getPathString(), artifact);
       }
-      BufferedReader reader = new BufferedReader(
-          new InputStreamReader(pruningManifest.getManifestFile().getPath().getInputStream()));
-      String line;
-      while ((line = reader.readLine()) != null) {
-        Artifact artifact = allowedRunfiles.get(line);
-        if (artifact != null) {
-          manifest.put(artifact.getRootRelativePath(), artifact);
+      try (BufferedReader reader = new BufferedReader(
+          new InputStreamReader(pruningManifest.getManifestFile().getPath().getInputStream()))) {
+        String line;
+        while ((line = reader.readLine()) != null) {
+          Artifact artifact = allowedRunfiles.get(line);
+          if (artifact != null) {
+            manifest.put(artifact.getRootRelativePath(), artifact);
+          }
         }
       }
     }
-
     manifest = filterListForObscuringSymlinks(eventHandler, location, manifest);
 
     // TODO(bazel-team): Create /dev/null-like Artifact to avoid nulls?
@@ -508,8 +508,12 @@ public final class Runfiles {
       this.suffix = "";
     }
 
-    public Builder(String suffix) {
-      this.suffix = suffix;
+    /**
+     * Creates a builder with the given suffix.
+     * @param workspace is the string specified in workspace() in the WORKSPACE file.
+     */
+    public Builder(String workspace) {
+      this.suffix = workspace;
     }
 
     /**

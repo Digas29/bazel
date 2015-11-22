@@ -37,11 +37,15 @@ import com.google.devtools.build.lib.pkgcache.TargetEdgeObserver;
 import com.google.devtools.build.lib.pkgcache.TargetPatternEvaluator;
 import com.google.devtools.build.lib.pkgcache.TargetProvider;
 import com.google.devtools.build.lib.pkgcache.TransitivePackageLoader;
-import com.google.devtools.build.lib.query2.engine.BlazeQueryEvalResult;
+import com.google.devtools.build.lib.query2.engine.Callback;
+import com.google.devtools.build.lib.query2.engine.DigraphQueryEvalResult;
 import com.google.devtools.build.lib.query2.engine.QueryEvalResult;
 import com.google.devtools.build.lib.query2.engine.QueryException;
 import com.google.devtools.build.lib.query2.engine.QueryExpression;
+import com.google.devtools.build.lib.query2.engine.QueryUtil.AbstractUniquifier;
+import com.google.devtools.build.lib.query2.engine.QueryUtil.AggregateAllCallback;
 import com.google.devtools.build.lib.query2.engine.SkyframeRestartQueryException;
+import com.google.devtools.build.lib.query2.engine.Uniquifier;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.util.Collection;
@@ -50,6 +54,7 @@ import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * The environment of a Blaze query. Not thread-safe.
@@ -98,15 +103,22 @@ public class BlazeQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
   }
 
   @Override
-  public BlazeQueryEvalResult<Target> evaluateQuery(QueryExpression expr)
-      throws QueryException, InterruptedException {
+  public DigraphQueryEvalResult<Target> evaluateQuery(QueryExpression expr,
+      final Callback<Target> callback) throws QueryException, InterruptedException {
     // Some errors are reported as QueryExceptions and others as ERROR events (if --keep_going). The
     // result is set to have an error iff there were errors emitted during the query, so we reset
     // errors here.
     eventHandler.resetErrors();
-    QueryEvalResult<Target> queryEvalResult = super.evaluateQuery(expr);
-    return new BlazeQueryEvalResult<>(queryEvalResult.getSuccess(), queryEvalResult.getResultSet(),
-        graph);
+    final AtomicBoolean empty = new AtomicBoolean(true);
+    QueryEvalResult queryEvalResult = super.evaluateQuery(expr, new Callback<Target>() {
+      @Override
+      public void process(Iterable<Target> partialResult)
+          throws QueryException, InterruptedException {
+        empty.compareAndSet(true, Iterables.isEmpty(partialResult));
+        callback.process(partialResult);
+      }
+    });
+    return new DigraphQueryEvalResult<>(queryEvalResult.getSuccess(), empty.get(), graph);
   }
 
   @Override
@@ -260,6 +272,24 @@ public class BlazeQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
   @Override
   public Set<Target> getNodesOnPath(Target from, Target to) {
     return getTargetsFromNodes(graph.getShortestPath(getNode(from), getNode(to)));
+  }
+
+  @Override
+  public void eval(QueryExpression expr, Callback<Target> callback)
+      throws QueryException, InterruptedException {
+    AggregateAllCallback<Target> aggregator = new AggregateAllCallback<>();
+    expr.eval(this, aggregator);
+    callback.process(aggregator.getResult());
+  }
+
+  @Override
+  public Uniquifier<Target> createUniquifier() {
+    return new AbstractUniquifier<Target, Label>() {
+      @Override
+      protected Label extractKey(Target target) {
+        return target.getLabel();
+      }
+    };
   }
 
   private void preloadTransitiveClosure(Set<Target> targets, int maxDepth) throws QueryException {

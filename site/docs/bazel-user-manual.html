@@ -1,142 +1,4 @@
-<!DOCTYPE html>
-
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>A User's Guide to Bazel</title>
-
-  <style type="text/css">
-
-    body {
-      background-color: #ffffff;
-      color: black;
-      margin-right: 10%;
-      margin-left: 10%;
-    }
-
-    h1, h2, h3, h4, h5, h6 {
-      color: #dd7755;
-      font-family: sans-serif;
-    }
-    @media print {
-      /* Darker version for printing */
-      h1, h2, h3, h4, h5, h6 {
-        color: #008000;
-        font-family: helvetica, sans-serif;
-      }
-    }
-
-    h1 {
-      text-align: center;
-    }
-    h2 {
-      margin-left: -0.5in;
-    }
-    h3 {
-      margin-left: -0.25in;
-    }
-    h4 {
-      margin-left: -0.125in;
-    }
-    hr {
-      margin-left: -1in;
-    }
-    address {
-      text-align: right;
-    }
-
-    /* A compact unordered list */
-    ul.tight > li {
-      margin-bottom: 0;
-    }
-
-    /* Use the <code></code> tag for bits of code and <var></var> for variable and object names. */
-    code,pre,samp,var {
-      color: #006000;
-    }
-    /* Use the <file></file> tag for file and directory paths and names. */
-    file {
-      color: #905050;
-      font-family: monospace;
-    }
-    /* Use the <kbd></kbd> tag for stuff the user should type. */
-    kbd {
-      color: #600000;
-    }
-    div.note p {
-      float: right;
-      width: 3in;
-      margin-right: 0%;
-      padding: 1px;
-      border: 2px solid #60a060;
-      background-color: #fffff0;
-    }
-
-    table.grid {
-      background-color: #ffffee;
-      border: 1px solid black;
-      border-collapse: collapse;
-      margin-left: 2mm;
-      margin-right: 2mm;
-    }
-
-    table.grid th,
-    table.grid td {
-      border: 1px solid black;
-      padding: 0 2mm 0 2mm;
-    }
-
-    /* Use pre.code for code listings.
-       Use pre.interaction for "Here's what you see when you run a.out.".
-       (Within pre.interaction, use <kbd></kbd> things the user types)
-     */
-    pre.code {
-      background-color: #FFFFEE;
-      border: 1px solid black;
-      color: #004000;
-      font-size: 10pt;
-      margin-left: 2mm;
-      margin-right: 2mm;
-      padding: 2mm;
-      -moz-border-radius: 12px 0px 0px 0px;
-    }
-
-    pre.interaction {
-      background-color: #EEFFEE;
-      color: #004000;
-      padding: 2mm;
-    }
-
-    pre.interaction kbd {
-      font-weight: bold;
-      color: #000000;
-    }
-
-    /* legacy style */
-    pre.interaction b.astyped {
-      color: #000000;
-    }
-
-    pre  {
-      margin-left: 5em;
-      color: #008000;
-    }
-    .tt td {
-      font-family: courier;
-    }
-
-    .deprecated { text-decoration: line-through; }
-    .discouraged { text-decoration: line-through; }
-
-    table.layout { width: 980px; }
-    table.layout td { vertical-align: top; }
-
-    #maintainer { text-align: right; }
-  </style>
-</head>
-
-<body>
-  <h1>A User's Guide to Bazel</h1>
+<h1>A User's Guide to Bazel</h1>
 
 <h2 id='overview'>Bazel overview</h2>
 
@@ -534,6 +396,12 @@ Specifying all rules recursively beneath a package:
   //foo/...:all     Matches all rules in all packages beneath directory 'foo'.
   //foo/...           (ditto)
 
+  By default, directory symlinks are followed when performing this recursive traversal. But we
+  understand that your workspace may intentionally contain directories with weird symlink structures
+  that you don't want consumed. As such, if a directory has a file named
+  'DONT_FOLLOW_SYMLINKS_WHEN_TRAVERSING_THIS_DIRECTORY_VIA_A_RECURSIVE_TARGET_PATTERN' then symlinks
+  in that directory won't be followed when evaluating recursive target patterns.
+
 Working-directory relative forms:  (assume cwd = 'workspace/foo')
 
   Target patterns which do not begin with '//' are taken relative to
@@ -797,11 +665,13 @@ $ bazel fetch //...
 <ul>
   <li>Use the same version of Crosstool
     (<code class='flag'>--crosstool_top</code>) as specified in the request
-    configuration.
+    configuration, unless <code class='flag'>--host_crosstool_top</code> is
+    specified.
   </li>
   <li>
     Use the value of <code class="flag">--host_cpu</code> for
-    <code class='flag'>--cpu</code> and <code class='flag'>--java_cpu</code>
+    <code class='flag'>--cpu</code>
+
     (default: <code>k8</code>).
   </li>
   <li>Use the same values of these options as specified in the request
@@ -811,6 +681,10 @@ $ bazel fetch //...
     <code class='flag'>--use_ijars</code>,
     <code class='flag'>--java_langtools</code>,
     <code class='flag'>--javabuilder_top</code>.
+    If <code class='flag'>--host_crosstool_top</code> is used, then the value of
+    <code class='flag'>--host_cpu</code> is used to look up a
+    <code>default_toolchain</code> in the Crosstool
+    (ignoring <code class='flag'>--compiler</code>) for the host configuration.
   </li>
   <li>Use optimized builds for C++ code (<code>-c opt</code>).
   </li>
@@ -1170,9 +1044,9 @@ $ bazel fetch //...
 </h4>
 <p>
   The <code>experimental_action_listener</code> option instructs Bazel to use
-  details from the <a href="build-encyclopedia.html#action_listener"
+  details from the <a href="be/extra-actions.html#action_listener"
   ><code>action_listener</code></a> rule specified by <var>label</var> to
-  insert <a href="build-encyclopedia.html#extra_action"
+  insert <a href="be/extra-actions.html#extra_action"
   ><code>extra_actions</code></a> into the build graph.
 </p>
 
@@ -1350,7 +1224,7 @@ $ bazel fetch //...
 <p>
   Build rules can also specify link options in their attributes. This option's
   settings always take precedence. Also see
-  <a href="build-encyclopedia.html#cc_library.linkopts">cc_library.linkopts</a>.
+  <a href="be/c-cpp.html#cc_library.linkopts">cc_library.linkopts</a>.
 </p>
 
 <h4 id='flag--strip'><code class='flag'>--strip (always|never|sometimes)</code></h4>
@@ -1384,7 +1258,7 @@ $ bazel fetch //...
 <h4 id='flag--stripopt'><code class='flag'>--stripopt <var>strip-option</var></code></h4>
 <p>
   An additional option to pass to the <code>strip</code> command when generating
-  a <a href="build-encyclopedia.html#cc_binary_implicit_outputs"><code>*.stripped</code>
+  a <a href="be/c-cpp.html#cc_binary_implicit_outputs"><code>*.stripped</code>
   binary</a>. The default is <code>-S -p</code>. This option can be used
   multiple times.
 </p>
@@ -1623,8 +1497,6 @@ the compilation of binaries during the build.
 </p>
 <p>
 
-  This option does not apply to Java binaries or to any C/C++ code linked into them; there are
-  <code class='flag'>--java_cpu</code> flag is used to specify that.
 </p>
 
 <p>
@@ -1637,14 +1509,6 @@ the compilation of binaries during the build.
 <p>
   This option specifies the name of the CPU architecture that should be
   used to build host tools.
-</p>
-
-<h4 id='flag--java_cpu'><code class='flag'>--java_cpu <var>cpu</var></code></h4>
-<p>
-  This option specifies the name of the CPU architecture (piii, k8, etc) that
-  should be used to build libraries dynamically loaded by the JVM.
-  By default it is set to k8, ensuring that all such libraries will be 64-bit
-  x86 code.
 </p>
 
 <h4 id='flag--experimental_skip_static_outputs'><code class='flag'>--experimental_skip_static_outputs</code></h4>
@@ -1713,7 +1577,7 @@ the compilation of binaries during the build.
 <h4 id='flag--dynamic_mode'><code class='flag'>--dynamic_mode <var>mode</var></code></h4>
 <p>
   Determines whether C++ binaries will be linked dynamically, interacting with
-  the <a href='build-encyclopedia.html#cc_binary.linkstatic'>linkstatic
+  the <a href='be/c-cpp.html#cc_binary.linkstatic'>linkstatic
   attribute</a> on build rules.
 </p>
 
@@ -1724,14 +1588,14 @@ the compilation of binaries during the build.
   <li><code>auto</code>: Translates to a platform-dependent mode;
       <code>default</code> for linux and <code>off</code> for cygwin.</li>
   <li><code>default</code>: Allows bazel to choose whether to link dynamically.
-      See <a href='build-encyclopedia.html#cc_binary.linkstatic'>linkstatic</a> for more
+      See <a href='be/c-cpp.html#cc_binary.linkstatic'>linkstatic</a> for more
       information.</li>
   <li><code>fully</code>: Links all targets dynamically.  This will speed up
       linking time, and reduce the size of the resulting binaries.
 
   </li>
   <li><code>off</code>: Links all targets in
-      <a href='build-encyclopedia.html#cc_binary.linkstatic'>mostly static</a> mode.
+      <a href='be/c-cpp.html#cc_binary.linkstatic'>mostly static</a> mode.
       If <code>-static</code> is set in linkopts, targets will change to fully
       static.</li>
 </ul>
@@ -1817,14 +1681,6 @@ the compilation of binaries during the build.
   the CROSSTOOL file and the following options where appropriate:
   <ul>
     <li><a href="#flag--cpu"><code class='flag'>--cpu</code></a></li>
-    <li><a href="#flag--java_cpu"><code class='flag'>--java_cpu</code></a></li>
-
-  </ul>
-</p>
-<p>
-  Note that only certain combinations of crosstool version, compiler version,
-  glibc version, and target CPU are allowed.
-</p>
 
 <h4 id='flag--javabuilder_top'><code class='flag'>--javabuilder_top <var>label</var></code></h4>
 <p>
@@ -1843,7 +1699,7 @@ the compilation of binaries during the build.
   This options set the label or the path of the base Java installation to use
   for running JavaBuilder, SingleJar, and is also used for bazel run and inside
   Java binaries built by <code>java_binary</code> rules. The various
-  <a href='build-encyclopedia.html#make_variables'>"Make" variables</a> for
+  <a href='be/make-variables.html'>"Make" variables</a> for
   Java (<code>JAVABASE</code>, <code>JAVA</code>, <code>JAVAC</code> and
   <code>JAR</code>) are derived from this option.
 </p>
@@ -2125,33 +1981,6 @@ cores directly from system configuration and will assume 1.0 I/O resource.
   breakages in the <code>foo</code> tree.
 </p>
 
-<h4 id="flag--compile_only"><code class='flag'>--[no]compile_only</code></h4>
-<p>
-  This option forces Bazel to execute only "lightweight" compilation steps
-  related to the specified targets. At this time such steps only include
-  compilation of sources for <code>cc_*</code> and <code>java_*</code> rules
-  without building dependencies or performing linking.
-</p>
-<p>
-  This option can be useful to quickly validate a given C++ or Java target for
-  compilation errors. In particular, it might be especially useful when
-  specified together with the <a href="#flag--compile_one_dependency">
-  <code class='flag'>--compile_one_dependency</code></a> option.
-</p>
-
-<h4 id="flag--compilation_prerequisites_only"><code class='flag'>--[no]compilation_prerequisites_only</code></h4>
-<p>
-  Given this option, Bazel will only build files that are prerequisites for
-  compilation of the given target (for example, generated headers and source
-  files), but will not build the target itself.
-</p>
-<p>
-  This option can be useful to quickly validate a given C++ or Java target for
-  compilation errors. In particular, it might be especially useful when
-  specified together with the <a href="#flag--compile_one_dependency">
-  <code class='flag'>--compile_one_dependency</code></a> option.
-</p>
-
 <h4 id='flag--check_up_to_date'><code class='flag'>--[no]check_up_to_date</code></h4>
 <p>
   This option causes Bazel not to perform a build, but merely check
@@ -2205,13 +2034,6 @@ cores directly from system configuration and will assume 1.0 I/O resource.
   To ensure that Bazel prints the location of the additional output files, check that
   your <a href='#flag--show_result'><code class='flag'>--show_result <var>n</var></code></a>
   setting is high enough.
-</p>
-
-<h4 id='flag--source_jars'><code class='flag'>--[no]source_jars</code></h4>
-<p>
-  By default, this option is disabled. If enabled, Bazel will also build all
-  source jars in the transitive closure of the targets specified on the command
-  line.
 </p>
 
 <h4 id='flag--test_size_filters'><code class='flag'>--test_size_filters <var>size[,size]*</var></code></h4>
@@ -2278,7 +2100,7 @@ cores directly from system configuration and will assume 1.0 I/O resource.
 <h4 id='flag--test_lang_filters'><code class='flag'>--test_lang_filters <var>lang[,lang]*</var></code></h4>
 <p>
   Specifies a comma-separated list of test languages for languages with an official <code>*_test</code> rule the
-  (see <a href="build-encyclopedia.html">build encyclopedia</a> for a full list of these). Each
+  (see <a href="be/overview.html">build encyclopedia</a> for a full list of these). Each
   language can be optionally preceded with '-' to specify excluded
   languages.  The name used for each language should be the same as
   the language prefix in the <code>*_test</code> rule, for example,
@@ -2488,7 +2310,7 @@ either to the terminal, or to additional log files.
 <p>
   Stamping can be enabled or disabled explicitly in BUILD using
   the <code>stamp</code> attribute of certain rule types, please refer to
-  the <a href="build-encyclopedia.html">build encyclopedia</a> for details. For
+  the <a href="be/overview.html">build encyclopedia</a> for details. For
   rules that are neither explicitly or implicitly configured as <code>stamp =
   0</code> or <code>stamp = 1</code>, the <code class='flag'>--[no]stamp</code> option
   selects whether stamping is enabled. Bazel never stamps binaries that are
@@ -2923,41 +2745,7 @@ Examples:
   <a href='#build'>bazel build</a>.
 </p>
 
-<h3 id='tags_keywords'>Test rule <code>tags</code> attribute keywords and other
-  common attributes</h3>
 
-<p>
-  Bazel modifies test behavior if it finds the following keywords in the
-  <code>tags</code> attribute of the test rule:
-</p>
-<ul>
-  <li><code>exclusive</code> keyword will force test to be run in the
-    &quot;exclusive&quot; mode, ensuring that no other tests are running at the
-    same time. Such tests will be executed in serial fashion after all build
-    activity and non-exclusive tests have been completed.
-
-  </li>
-
-  <li><code>manual</code> keyword will force test to be ignored by all command
-    line wildcards (<code>...</code>, <code>:*</code>, <code>:all</code>, etc).
-    It will also be ignored by the <code>test_suite</code> rules that do not
-    mention this test explicitly. The only way
-    to run such test is to specify it explicitly on the command line.
-  </li>
-  <li><code>external</code> keyword will force test to be unconditionally
-    executed (regardless of <code class='flag'>--cache_test_results</code> value).
-  </li>
-</ul>
-<p>
-  There are also several other attributes that affect test behavior:
-</p>
-<ul>
-  <li>Test rules marked with the <code>flaky=1</code> attribute are considered
-    to be flaky and will be automatically retried up to 3 times unless larger
-    <code class='flag'>--flaky_test_attempts</code> value has been specified.
-  </li>
-
-</ul>
 
 <h2 id='run'>Running executables with Bazel</h2>
 <p>
@@ -3218,7 +3006,7 @@ in an environment closer to the current shell environment. Note that none of the
   </li>
   <li>
     The complete
-    <a href='build-encyclopedia.html#make_variables'
+    <a href='be/make-variables.html'
     >"Make" environment</a>. If the <code class='flag'>--show_make_env</code> flag is
     specified, all variables in the current configuration's "Make" environment
     are also displayed (e.g. <code>CC</code>, <code>GLIBC_VERSION</code>, etc).
@@ -3448,16 +3236,17 @@ adb -s deadbeef install ...
 
 <h4 id='flag--host_jvm_args'><code class='flag'>--host_jvm_args=<var>string</var></code></h4>
 <p>
-  Specifies a space-separated list of startup options to be passed to
-  the Java virtual machine in which <i>Bazel itself</i> runs.  This
-  can be used to set the stack size, for example:
+  Specifies a startup option to be passed to the Java virtual machine in which <i>Bazel itself</i>
+  runs.  This can be used to set the stack size, for example:
 </p>
 <pre>
   % bazel --host_jvm_args="-Xss256K" build //foo
 </pre>
 <p>
   This option can be used multiple times with individual arguments. Note that
-  setting this flag should rarely be needed.
+  setting this flag should rarely be needed. You can also pass a space-separated list of strings,
+  each of which will be interpreted as a separate JVM argument, but this feature will soon be
+  deprecated.
 
 </p>
 <p>
@@ -3945,5 +3734,3 @@ Start time: [time elapsed from the profiling session start]       Duration: [tas
   </ul></li>
 </ul>
 
-</body>
-</html>

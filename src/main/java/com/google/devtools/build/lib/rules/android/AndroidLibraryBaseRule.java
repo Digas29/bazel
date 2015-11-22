@@ -67,8 +67,7 @@ public final class AndroidLibraryBaseRule implements RuleDefinition {
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
         .add(attr("srcs", LABEL_LIST)
             .direct_compile_time_input()
-            .allowedFileTypes(JavaSemantics.JAVA_SOURCE, JavaSemantics.JAR,
-                JavaSemantics.SOURCE_JAR))
+            .allowedFileTypes(JavaSemantics.JAVA_SOURCE, JavaSemantics.SOURCE_JAR))
         /* <!-- #BLAZE_RULE(android_library).ATTRIBUTE(deps) -->
         The list of other libraries to link against.
         ${SYNOPSIS}
@@ -80,6 +79,16 @@ public final class AndroidLibraryBaseRule implements RuleDefinition {
         .override(builder.copy("deps")
             .allowedRuleClasses(AndroidRuleClasses.ALLOWED_DEPENDENCIES)
             .allowedFileTypes())
+        /* <!-- #BLAZE_RULE(android_library).ATTRIBUTE(exports) -->
+        The transitive closure of all rules reached via <code>exports</code> attributes
+        are considered direct dependencies of any rule that directly depends on the
+        target with <code>exports</code>.
+        ${SYNOPSIS}
+        <p>The <code>exports</code> are not direct deps of the rule they belong to.</p>
+        <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
+        .add(attr("exports", LABEL_LIST)
+            .allowedRuleClasses(AndroidRuleClasses.ALLOWED_DEPENDENCIES)
+            .allowedFileTypes(/*May not have files in exports!*/))
         .add(attr("alwayslink", BOOLEAN).undocumented("purely informational for now"))
         /* <!-- #BLAZE_RULE(android_library).ATTRIBUTE(neverlink) -->
         Only use this library for compilation and not at runtime.
