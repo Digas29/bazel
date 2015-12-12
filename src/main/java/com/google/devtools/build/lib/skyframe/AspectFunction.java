@@ -14,7 +14,6 @@
 
 package com.google.devtools.build.lib.skyframe;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ListMultimap;
 import com.google.devtools.build.lib.analysis.CachingAnalysisEnvironment;
@@ -35,13 +34,14 @@ import com.google.devtools.build.lib.packages.NoSuchTargetException;
 import com.google.devtools.build.lib.packages.Package;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.RuleClassProvider;
+import com.google.devtools.build.lib.packages.SkylarkAspectClass;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.rules.SkylarkRuleClassFunctions.SkylarkAspect;
-import com.google.devtools.build.lib.rules.SkylarkRuleClassFunctions.SkylarkAspectClass;
 import com.google.devtools.build.lib.skyframe.AspectValue.AspectKey;
 import com.google.devtools.build.lib.skyframe.ConfiguredTargetFunction.DependencyEvaluationException;
 import com.google.devtools.build.lib.skyframe.SkyframeExecutor.BuildViewProvider;
 import com.google.devtools.build.lib.syntax.Type.ConversionException;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyFunctionException;
 import com.google.devtools.build.skyframe.SkyKey;
@@ -73,7 +73,7 @@ public final class AspectFunction implements SkyFunction {
       Environment env, Label extensionLabel, String skylarkValueName)
       throws ConversionException {
     
-    SkyKey importFileKey = SkylarkImportLookupValue.key(extensionLabel);
+    SkyKey importFileKey = SkylarkImportLookupValue.key(extensionLabel, false);
     SkylarkImportLookupValue skylarkImportLookupValue =
         (SkylarkImportLookupValue) env.getValue(importFileKey);
     if (skylarkImportLookupValue == null) {

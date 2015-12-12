@@ -13,11 +13,11 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.cmdline.PackageIdentifier.RepositoryName;
 import com.google.devtools.build.lib.cmdline.ResolvedTargets;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
@@ -28,6 +28,7 @@ import com.google.devtools.build.lib.pkgcache.FilteringPolicy;
 import com.google.devtools.build.lib.pkgcache.TargetPatternResolverUtil;
 import com.google.devtools.build.lib.skyframe.PrepareDepsOfTargetsUnderDirectoryValue.PrepareDepsOfTargetsUnderDirectoryKey;
 import com.google.devtools.build.lib.skyframe.RecursivePkgValue.RecursivePkgKey;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.RootedPath;
 import com.google.devtools.build.skyframe.SkyFunction;
@@ -48,6 +49,11 @@ import javax.annotation.Nullable;
  * subdirectories.
  */
 public class PrepareDepsOfTargetsUnderDirectoryFunction implements SkyFunction {
+  private final BlazeDirectories directories;
+
+  public PrepareDepsOfTargetsUnderDirectoryFunction(BlazeDirectories directories) {
+    this.directories = directories;
+  }
 
   @Override
   public SkyValue compute(SkyKey skyKey, Environment env) {
@@ -58,13 +64,14 @@ public class PrepareDepsOfTargetsUnderDirectoryFunction implements SkyFunction {
     return new MyTraversalFunction(filteringPolicy).visitDirectory(recursivePkgKey, env);
   }
 
-  private static class MyTraversalFunction
+  private class MyTraversalFunction
       extends RecursiveDirectoryTraversalFunction<MyVisitor,
       PrepareDepsOfTargetsUnderDirectoryValue> {
 
     private final FilteringPolicy filteringPolicy;
 
     private MyTraversalFunction(FilteringPolicy filteringPolicy) {
+      super(directories);
       this.filteringPolicy = filteringPolicy;
     }
 

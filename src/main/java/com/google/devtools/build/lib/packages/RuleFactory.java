@@ -14,7 +14,6 @@
 
 package com.google.devtools.build.lib.packages;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
@@ -27,6 +26,7 @@ import com.google.devtools.build.lib.syntax.Environment;
 import com.google.devtools.build.lib.syntax.FuncallExpression;
 import com.google.devtools.build.lib.syntax.UserDefinedFunction;
 import com.google.devtools.build.lib.util.Pair;
+import com.google.devtools.build.lib.util.Preconditions;
 
 import java.util.Map;
 import java.util.Set;
@@ -101,8 +101,7 @@ public class RuleFactory {
     } catch (LabelSyntaxException e) {
       throw new InvalidRuleException("illegal rule name: " + name + ": " + e.getMessage());
     }
-    boolean inWorkspaceFile =
-        location.getPath() != null && location.getPath().getBaseName().contains("WORKSPACE");
+    boolean inWorkspaceFile = pkgBuilder.isWorkspace();
     if (ruleClass.getWorkspaceOnly() && !inWorkspaceFile) {
       throw new RuleFactory.InvalidRuleException(
           ruleClass + " must be in the WORKSPACE file " + "(used by " + label + ")");

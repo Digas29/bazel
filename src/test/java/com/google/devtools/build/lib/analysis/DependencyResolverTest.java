@@ -14,6 +14,7 @@
 package com.google.devtools.build.lib.analysis;
 
 import static com.google.common.truth.Truth.assertThat;
+import static org.junit.Assert.assertNotNull;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ListMultimap;
@@ -33,7 +34,6 @@ import com.google.devtools.build.lib.packages.NoSuchThingException;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.testutil.TestRuleClassProvider;
 
-import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -55,11 +55,8 @@ import javax.annotation.Nullable;
 public class DependencyResolverTest extends AnalysisTestCase {
   private DependencyResolver dependencyResolver;
 
-  @Override
   @Before
-  public void setUp() throws Exception {
-    super.setUp();
-
+  public final void createResolver() throws Exception {
     dependencyResolver = new DependencyResolver() {
       @Override
       protected void invalidVisibilityReferenceHook(TargetAndConfiguration node, Label label) {
@@ -81,12 +78,6 @@ public class DependencyResolverTest extends AnalysisTestCase {
         }
       }
     };
-  }
-
-  @Override
-  @After
-  public void tearDown() throws Exception {
-    super.tearDown();
   }
 
   private void pkg(String name, String... contents) throws Exception {

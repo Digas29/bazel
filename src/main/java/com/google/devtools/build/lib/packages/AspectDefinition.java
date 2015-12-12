@@ -14,7 +14,6 @@
 
 package com.google.devtools.build.lib.packages;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableMultimap;
 import com.google.common.collect.ImmutableSet;
@@ -24,6 +23,7 @@ import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.packages.NativeAspectClass.NativeAspectFactory;
 import com.google.devtools.build.lib.util.BinaryPredicate;
+import com.google.devtools.build.lib.util.Preconditions;
 
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -112,9 +112,6 @@ public final class AspectDefinition {
 
   /**
    * Returns the attribute -&gt; set of required aspects map.
-   *
-   * <p>Note that the map actually contains {@link AspectFactory}
-   * instances, except that we cannot reference that class here.
    */
   public ImmutableMultimap<String, AspectClass> getAttributeAspects() {
     return attributeAspects;

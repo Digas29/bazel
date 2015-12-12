@@ -19,6 +19,7 @@ import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.ConfigurationCollectionFactory;
 import com.google.devtools.build.lib.analysis.config.ConfigurationFactory;
 import com.google.devtools.build.lib.analysis.config.FragmentOptions;
+import com.google.devtools.build.lib.packages.util.MockCcSupport;
 import com.google.devtools.build.lib.packages.util.MockToolsConfig;
 import com.google.devtools.build.lib.rules.repository.LocalRepositoryFunction;
 import com.google.devtools.build.lib.rules.repository.LocalRepositoryRule;
@@ -70,6 +71,12 @@ public abstract class AnalysisMock {
 
   public abstract ImmutableList<Class<? extends FragmentOptions>> getBuildOptions();
 
+  public abstract MockCcSupport ccSupport();
+
+  public void setupCcSupport(MockToolsConfig config) throws IOException {
+    get().ccSupport().setup(config);
+  }
+
   public ImmutableMap<SkyFunctionName, SkyFunction> getSkyFunctions(BlazeDirectories directories) {
     // Some tests require the local_repository rule so we need the appropriate SkyFunctions.
     RepositoryFunction localRepositoryFunction = new LocalRepositoryFunction();
@@ -77,11 +84,9 @@ public abstract class AnalysisMock {
     ImmutableMap<String, RepositoryFunction> repositoryHandlers = ImmutableMap.of(
         LocalRepositoryRule.NAME, localRepositoryFunction);
 
-    return ImmutableMap.of(
+    return ImmutableMap.<SkyFunctionName, SkyFunction>of(
         SkyFunctions.REPOSITORY,
-        new RepositoryDelegatorFunction(directories, repositoryHandlers, new AtomicBoolean(true)),
-        localRepositoryFunction.getSkyFunctionName(),
-        localRepositoryFunction);
+        new RepositoryDelegatorFunction(directories, repositoryHandlers, new AtomicBoolean(true)));
   }
 
   public static class Delegate extends AnalysisMock {
@@ -109,6 +114,11 @@ public abstract class AnalysisMock {
     @Override
     public ConfigurationCollectionFactory createConfigurationCollectionFactory() {
       return delegate.createConfigurationCollectionFactory();
+    }
+
+    @Override
+    public MockCcSupport ccSupport() {
+      return delegate.ccSupport();
     }
 
     @Override

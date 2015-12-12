@@ -92,7 +92,7 @@ TEST_log=$TEST_TMPDIR/log       # The log file over which the
                                 # be absolute to be robust against
                                 # tests invoking 'cd'!
 
-TEST_passed=true                # The result of the current test;
+TEST_passed="true"              # The result of the current test;
                                 # failed assertions cause this to
                                 # become false.
 
@@ -113,7 +113,7 @@ if [ $# -gt 0 ]; then
   fi
 fi
 
-TEST_verbose=true               # Whether or not to be verbose.  A
+TEST_verbose="true"             # Whether or not to be verbose.  A
                                 # command; "true" or "false" are
                                 # acceptable.  The default is: true.
 
@@ -183,7 +183,7 @@ function fail() {
     __show_log >&2
     echo "$TEST_name FAILED: $1." >&2
     echo "$1" >$TEST_TMPDIR/__fail
-    TEST_passed=false
+    TEST_passed="false"
     __show_stack
     # Cleanup as we are leaving the subshell now
     tear_down
@@ -216,7 +216,7 @@ __show_stack() {
 
     # Skip over active calls within this module:
     while (( i < ${#FUNCNAME[@]} )) && [[ ${BASH_SOURCE[i]:-} == ${BASH_SOURCE[0]} ]]; do
-       (( i++ ))
+       (( ++i ))
     done
 
     # Show all calls until the next one within this module (typically run_suite):
@@ -224,7 +224,7 @@ __show_stack() {
         # Read online docs for BASH_LINENO to understand the strange offset.
         # Undefined can occur in the BASH_SOURCE stack apparently when one exits from a subshell
         echo "${BASH_SOURCE[i]:-"Unknown"}:${BASH_LINENO[i - 1]:-"Unknown"}: in call to ${FUNCNAME[i]:-"Unknown"}" >&2
-        (( i++ ))
+        (( ++i ))
         trace_found=1
     done
 
@@ -406,7 +406,7 @@ function __update_shards() {
 function __test_terminated() {
    __show_log >&2
     echo "$TEST_name FAILED: terminated by signal $1." >&2
-    TEST_passed=false
+    TEST_passed="false"
     __show_stack
     timeout
     exit 1
@@ -513,10 +513,12 @@ function run_suite() {
 
     for TEST_name in ${TESTS[@]}; do
       >$TEST_log # Reset the log.
-      TEST_passed=true
+      TEST_passed="true"
 
       total=$(($total + 1))
-      $TEST_verbose && __pad $TEST_name '*' >&2
+      if [[ "$TEST_verbose" == "true" ]]; then
+          __pad $TEST_name '*' >&2
+      fi
 
       local run_time="0.0"
 
@@ -531,9 +533,9 @@ function run_suite() {
           timestamp >$TEST_TMPDIR/__ts_start
           set_up
           eval $TEST_name
-          timestamp >$TEST_TMPDIR/__ts_end
           tear_down
-          test $TEST_passed == true
+          timestamp >$TEST_TMPDIR/__ts_end
+          test $TEST_passed == "true"
         ) 2>&1 | tee $TEST_TMPDIR/__log
         # Note that tee will prevent the control flow continuing if the test
         # spawned any processes which are still running and have not closed
@@ -541,7 +543,7 @@ function run_suite() {
 
         test_subshell_status=${PIPESTATUS[0]}
         if [ "$test_subshell_status" != 0 ]; then
-          TEST_passed=false
+          TEST_passed="false"
           # Ensure that an end time is recorded in case the test subshell
           # terminated prematurely.
           [ -f $TEST_TMPDIR/__ts_end ] || timestamp >$TEST_TMPDIR/__ts_end
@@ -562,19 +564,25 @@ function run_suite() {
       fi
 
       local testcase_tag=""
-      if $TEST_passed; then
-        $TEST_verbose && echo "PASSED: $TEST_name" >&2
+
+      if [[ "$TEST_passed" == "true" ]]; then
+        if [[ "$TEST_verbose" == "true" ]]; then
+          echo "PASSED: $TEST_name" >&2
+        fi
         passed=$(($passed + 1))
         testcase_tag="<testcase name=\"$TEST_name\" status=\"run\" time=\"$run_time\" classname=\"\"></testcase>"
       else
         echo "FAILED: $TEST_name" >&2
         # end marker in CDATA cannot be escaped, we need to split the CDATA sections
         log=$(cat $TEST_TMPDIR/__log | sed 's/]]>/]]>]]&gt;<![CDATA[/g')
-        fail_msg=$(cat $TEST_TMPDIR/__fail || echo "No failure message")
+        fail_msg=$(cat $TEST_TMPDIR/__fail 2> /dev/null || echo "No failure message")
         testcase_tag="<testcase name=\"$TEST_name\" status=\"run\" time=\"$run_time\" classname=\"\"><error message=\"$fail_msg\"><![CDATA[$log]]></error></testcase>"
       fi
-      $TEST_verbose && echo >&2
-    __log_to_test_report "<\/testsuite>" "$testcase_tag"
+
+      if [[ "$TEST_verbose" == "true" ]]; then
+          echo >&2
+      fi
+      __log_to_test_report "<\/testsuite>" "$testcase_tag"
     done
 
     __finish_test_report $total $passed

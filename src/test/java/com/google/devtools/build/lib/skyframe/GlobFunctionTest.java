@@ -90,6 +90,7 @@ public abstract class GlobFunctionTest {
   private SequentialBuildDriver driver;
   private RecordingDifferencer differencer;
   private Path root;
+  private Path writableRoot;
   private Path outputBase;
   private Path pkgPath;
   private AtomicReference<PathPackageLocator> pkgLocator;
@@ -98,14 +99,16 @@ public abstract class GlobFunctionTest {
   private static final PackageIdentifier PKG_PATH_ID = PackageIdentifier.createInDefaultRepo("pkg");
 
   @Before
-  public void setUp() throws Exception {
-    
+  public final void setUp() throws Exception  {
     fs = new CustomInMemoryFs(new ManualClock());
     root = fs.getRootDirectory().getRelative("root/workspace");
+    writableRoot = fs.getRootDirectory().getRelative("writableRoot/workspace");
     outputBase = fs.getRootDirectory().getRelative("output_base");
     pkgPath = root.getRelative(PKG_PATH_ID.getPackageFragment());
 
-    pkgLocator = new AtomicReference<>(new PathPackageLocator(outputBase, ImmutableList.of(root)));
+    pkgLocator =
+        new AtomicReference<>(
+            new PathPackageLocator(outputBase, ImmutableList.of(writableRoot, root)));
     tsgm = new TimestampGranularityMonitor(BlazeClock.instance());
 
     differencer = new RecordingDifferencer();
@@ -122,7 +125,7 @@ public abstract class GlobFunctionTest {
   private Map<SkyFunctionName, SkyFunction> createFunctionMap() {
     AtomicReference<ImmutableSet<PackageIdentifier>> deletedPackages =
         new AtomicReference<>(ImmutableSet.<PackageIdentifier>of());
-    ExternalFilesHelper externalFilesHelper = new ExternalFilesHelper(pkgLocator);
+    ExternalFilesHelper externalFilesHelper = new ExternalFilesHelper(pkgLocator, false);
 
     Map<SkyFunctionName, SkyFunction> skyFunctions = new HashMap<>();
     skyFunctions.put(SkyFunctions.GLOB, new GlobFunction(alwaysUseDirListing()));
@@ -137,7 +140,7 @@ public abstract class GlobFunctionTest {
         SkyFunctions.FILE_STATE,
         new FileStateFunction(
             new TimestampGranularityMonitor(BlazeClock.instance()), externalFilesHelper));
-    skyFunctions.put(SkyFunctions.FILE, new FileFunction(pkgLocator, tsgm, externalFilesHelper));
+    skyFunctions.put(SkyFunctions.FILE, new FileFunction(pkgLocator));
     return skyFunctions;
   }
 
@@ -308,6 +311,15 @@ public abstract class GlobFunctionTest {
   public void testStarStarDoesNotCrossPackageBoundary() throws Exception {
     FileSystemUtils.createEmptyFile(pkgPath.getRelative("foo/bar/BUILD"));
     // "foo/bar" should not be in the results because foo/bar is a separate package.
+    assertGlobMatches("foo/**", /* => */ "foo", "foo/barnacle", "foo/barnacle/wiz");
+  }
+
+  @Test
+  public void testGlobDoesNotCrossPackageBoundaryUnderOtherPackagePath() throws Exception {
+    FileSystemUtils.createDirectoryAndParents(writableRoot.getRelative("pkg/foo/bar"));
+    FileSystemUtils.createEmptyFile(writableRoot.getRelative("pkg/foo/bar/BUILD"));
+    // "foo/bar" should not be in the results because foo/bar is detected as a separate package,
+    // even though it is under a different package path.
     assertGlobMatches("foo/**", /* => */ "foo", "foo/barnacle", "foo/barnacle/wiz");
   }
 

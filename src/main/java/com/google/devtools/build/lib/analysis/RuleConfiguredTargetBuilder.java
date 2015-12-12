@@ -15,11 +15,8 @@ package com.google.devtools.build.lib.analysis;
 
 import static com.google.devtools.build.lib.analysis.ExtraActionUtils.createExtraActionProvider;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
-import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.ExtraActionArtifactsProvider.ExtraArtifactSet;
 import com.google.devtools.build.lib.analysis.LicensesProvider.TargetLicense;
@@ -43,6 +40,7 @@ import com.google.devtools.build.lib.rules.test.TestProvider;
 import com.google.devtools.build.lib.rules.test.TestProvider.TestParams;
 import com.google.devtools.build.lib.syntax.EvalException;
 import com.google.devtools.build.lib.syntax.Type;
+import com.google.devtools.build.lib.util.Preconditions;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -64,7 +62,6 @@ public final class RuleConfiguredTargetBuilder {
   private RunfilesSupport runfilesSupport;
   private Artifact executable;
   private ImmutableList<Artifact> mandatoryStampFiles;
-  private ImmutableSet<Action> actionsWithoutExtraAction = ImmutableSet.of();
 
   public RuleConfiguredTargetBuilder(RuleContext ruleContext) {
     this.ruleContext = ruleContext;
@@ -114,7 +111,7 @@ public final class RuleConfiguredTargetBuilder {
     }
 
     ExtraActionArtifactsProvider extraActionsProvider =
-        createExtraActionProvider(actionsWithoutExtraAction, ruleContext);
+        createExtraActionProvider(ruleContext);
     if (mandatoryStampFiles != null && !mandatoryStampFiles.isEmpty()) {
       extraActionsProvider = ExtraActionArtifactsProvider.create(
           extraActionsProvider.getExtraActionArtifacts(),
@@ -238,13 +235,6 @@ public final class RuleConfiguredTargetBuilder {
   }
 
   /**
-   * Add a specific provider with a given value. Shortcut for addProvider(value.getClass(), value).
-   */
-  public RuleConfiguredTargetBuilder addProvider(TransitiveInfoProvider value) {
-    return addProvider(value.getClass(), value);
-  }
-
-  /**
    * Add multiple providers with given values.
    */
   public RuleConfiguredTargetBuilder addProviders(
@@ -341,15 +331,6 @@ public final class RuleConfiguredTargetBuilder {
    */
   public RuleConfiguredTargetBuilder setMandatoryStampFiles(ImmutableList<Artifact> files) {
     this.mandatoryStampFiles = files;
-    return this;
-  }
-
-  /**
-   * Set the extra action pseudo actions.
-   */
-  public RuleConfiguredTargetBuilder setActionsWithoutExtraAction(
-      ImmutableSet<Action> actions) {
-    this.actionsWithoutExtraAction = actions;
     return this;
   }
 }

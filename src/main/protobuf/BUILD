@@ -10,7 +10,9 @@ FILES = [
     "crosstool_config",
     "extra_actions_base",
     "android_studio_ide_info",
+    "package_manifest",
     "test_status",
+    "plmerge",
     "bundlemerge",
     "xcodegen",
     "worker_protocol",
@@ -21,6 +23,11 @@ FILES = [
     name = s + "_proto",
     src = s + ".proto",
 ) for s in FILES]
+
+proto_java_library(
+    name = "build_proto_v2",
+    src = "build.proto",
+)
 
 filegroup(
     name = "srcs",

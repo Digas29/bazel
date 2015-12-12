@@ -14,18 +14,16 @@
 package com.google.devtools.build.lib.bazel.rules.android;
 
 import com.google.devtools.build.lib.analysis.RuleDefinition;
-import com.google.devtools.build.lib.cmdline.PackageIdentifier.RepositoryName;
 import com.google.devtools.build.lib.packages.AttributeMap;
 import com.google.devtools.build.lib.packages.NonconfigurableAttributeMapper;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.rules.repository.RepositoryFunction;
-import com.google.devtools.build.lib.skyframe.FileValue;
 import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.ResourceFileLoader;
+import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
+import com.google.devtools.build.skyframe.SkyFunction.Environment;
 import com.google.devtools.build.skyframe.SkyFunctionException;
-import com.google.devtools.build.skyframe.SkyFunctionName;
-import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
 
 import java.io.IOException;
@@ -35,22 +33,18 @@ import java.io.IOException;
  */
 public class AndroidSdkRepositoryFunction extends RepositoryFunction {
   @Override
-  public SkyValue compute(SkyKey skyKey, Environment env) throws SkyFunctionException {
-    RepositoryName repositoryName = (RepositoryName) skyKey.argument();
-    Rule rule = getRule(repositoryName, AndroidSdkRepositoryRule.NAME, env);
-    if (rule == null) {
-      return null;
-    }
+  public boolean isLocal() {
+    return true;
+  }
 
-    FileValue directoryValue = prepareLocalRepositorySymlinkTree(rule, env);
-    if (directoryValue == null) {
-      return null;
-    }
-
+  @Override
+  public SkyValue fetch(Rule rule, Environment env)
+      throws SkyFunctionException {
+    Path outputDirectory = prepareLocalRepositorySymlinkTree(rule, env);
     PathFragment pathFragment = getTargetPath(rule);
 
     if (!symlinkLocalRepositoryContents(
-        directoryValue.realRootedPath().asPath(),
+        outputDirectory,
         getOutputBase().getFileSystem().getPath(pathFragment),
         env)) {
       return null;
@@ -72,15 +66,7 @@ public class AndroidSdkRepositoryFunction extends RepositoryFunction {
         .replaceAll("%build_tools_version%", buildToolsVersion)
         .replaceAll("%api_level%", apiLevel.toString());
 
-    return writeBuildFile(directoryValue, buildFile);
-  }
-
-  /**
-   * @see RepositoryFunction#getRule(RepositoryName, String, Environment)
-   */
-  @Override
-  public SkyFunctionName getSkyFunctionName() {
-    return SkyFunctionName.create(AndroidSdkRepositoryRule.NAME.toUpperCase());
+    return writeBuildFile(outputDirectory, buildFile);
   }
 
   @Override

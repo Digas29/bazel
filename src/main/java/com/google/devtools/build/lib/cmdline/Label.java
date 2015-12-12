@@ -13,7 +13,6 @@
 // limitations under the License.
 package com.google.devtools.build.lib.cmdline;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ComparisonChain;
 import com.google.devtools.build.lib.cmdline.LabelValidator.BadLabelException;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
@@ -22,6 +21,7 @@ import com.google.devtools.build.lib.syntax.Printer;
 import com.google.devtools.build.lib.syntax.SkylarkCallable;
 import com.google.devtools.build.lib.syntax.SkylarkModule;
 import com.google.devtools.build.lib.syntax.SkylarkPrintableValue;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.util.StringCanonicalizer;
 import com.google.devtools.build.lib.util.StringUtilities;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -41,7 +41,12 @@ import java.io.Serializable;
 @SkylarkModule(name = "Label", doc = "A BUILD target identifier.")
 @Immutable @ThreadSafe
 public final class Label implements Comparable<Label>, Serializable, SkylarkPrintableValue {
-  private static final PathFragment EXTERNAL = new PathFragment("external");
+  public static final PathFragment EXTERNAL_PACKAGE_NAME = new PathFragment("external");
+
+  public static final PackageIdentifier EXTERNAL_PACKAGE_IDENTIFIER =
+      PackageIdentifier.createInDefaultRepo(EXTERNAL_PACKAGE_NAME);
+
+  public static final String EXTERNAL_PATH_PREFIX = "external";
 
   /**
    * Factory for Labels from absolute string form. e.g.
@@ -380,7 +385,7 @@ public final class Label implements Comparable<Label>, Serializable, SkylarkPrin
 
     if (packageIdentifier.getRepository().isDefault()
         || !relative.packageIdentifier.getRepository().isDefault()
-        || relative.packageIdentifier.getPackageFragment().equals(EXTERNAL)) {
+        || relative.packageIdentifier.getPackageFragment().equals(EXTERNAL_PACKAGE_NAME)) {
       return relative;
     } else {
       try {

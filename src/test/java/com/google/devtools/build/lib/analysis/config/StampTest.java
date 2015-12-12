@@ -13,6 +13,8 @@
 // limitations under the License.
 package com.google.devtools.build.lib.analysis.config;
 
+import static org.junit.Assert.assertEquals;
+
 import com.google.devtools.build.lib.analysis.util.BuildViewTestCase;
 import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.RuleClass;
@@ -21,13 +23,19 @@ import com.google.devtools.build.lib.packages.TargetUtils;
 import com.google.devtools.build.lib.packages.TriState;
 import com.google.devtools.build.lib.testutil.TestRuleClassProvider;
 
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.JUnit4;
+
 /**
  * Tests for link stamping.
  */
+@RunWith(JUnit4.class)
 public class StampTest extends BuildViewTestCase {
   /**
    * Tests that link stamping is disabled for all tests that support it.
    */
+  @Test
   public void testNoStampingForTests() throws Exception {
     RuleFactory ruleFactory = new RuleFactory(TestRuleClassProvider.getRuleClassProvider());
     for (String name : ruleFactory.getRuleClassNames()) {

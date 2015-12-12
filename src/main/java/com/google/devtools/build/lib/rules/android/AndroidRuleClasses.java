@@ -378,30 +378,6 @@ public final class AndroidRuleClasses {
   }
 
   /**
-   * Definition of the {@code android_tools_defaults_jar} rule.
-   */
-  public static final class AndroidToolsDefaultsJarRule implements RuleDefinition {
-    @Override
-    public RuleClass build(Builder builder, RuleDefinitionEnvironment environment) {
-      return builder
-          .setUndocumented()
-          .add(attr(":android_sdk", LABEL)
-              .allowedRuleClasses("android_sdk", "filegroup")
-              .value(ANDROID_SDK))
-          .build();
-    }
-
-    @Override
-    public Metadata getMetadata() {
-    return RuleDefinition.Metadata.builder()
-        .name("android_tools_defaults_jar")
-        .ancestors(BaseRuleClasses.BaseRule.class)
-        .factoryClass(AndroidToolsDefaultsJar.class)
-        .build();
-    }
-  }
-
-  /**
    * Base class for rule definitions using AAPT.
    */
   public static final class AndroidAaptBaseRule implements RuleDefinition {
@@ -712,6 +688,7 @@ com/google/common/base/Objects.class
             </ul>
           <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
           .add(attr("legacy_native_support", TRISTATE).value(TriState.AUTO))
+          .add(attr(":extra_proguard_specs", LABEL_LIST).value(JavaSemantics.EXTRA_PROGUARD_SPECS))
           .advertiseProvider(JavaCompilationArgsProvider.class)
           .build();
       }

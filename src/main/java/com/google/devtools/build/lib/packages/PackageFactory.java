@@ -16,7 +16,6 @@ package com.google.devtools.build.lib.packages;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
@@ -60,6 +59,7 @@ import com.google.devtools.build.lib.syntax.Statement;
 import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.syntax.Type.ConversionException;
 import com.google.devtools.build.lib.util.Pair;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -390,6 +390,7 @@ public final class PackageFactory {
     this.environmentExtensions = ImmutableList.copyOf(environmentExtensions);
     this.packageArguments = createPackageArguments();
     this.nativeModule = newNativeModule();
+    this.workspaceNativeModule = WorkspaceFactory.newNativeModule(ruleClassProvider);
   }
 
   /**
@@ -1223,10 +1224,11 @@ public final class PackageFactory {
   }
 
   private final ClassObject nativeModule;
+  private final ClassObject workspaceNativeModule;
 
   /** @return the Skylark struct to bind to "native" */
-  public ClassObject getNativeModule() {
-    return nativeModule;
+  public ClassObject getNativeModule(boolean workspace) {
+    return workspace ? workspaceNativeModule : nativeModule;
   }
 
   /**

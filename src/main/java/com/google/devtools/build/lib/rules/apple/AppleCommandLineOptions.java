@@ -33,12 +33,14 @@ public class AppleCommandLineOptions extends FragmentOptions {
   @Option(
     name = "xcode_version",
     defaultValue = "null",
-    category = "undocumented",
+    category = "build",
     converter = DottedVersionConverter.class,
     help =
         "If specified, uses xcode of the given version for relevant build actions. "
             + "If unspecified, uses the executor default version of xcode."
   )
+  // TODO(bazel-team): This should be of String type, to allow referencing an alias based
+  // on an xcode_config target.
   public DottedVersion xcodeVersion;
 
   @Option(

@@ -80,25 +80,24 @@ public abstract class AndroidLibrary implements RuleConfiguredTargetFactory {
     final ResourceApk resourceApk;
     if (definesLocalResources) {
       ApplicationManifest applicationManifest = androidSemantics.getManifestForRule(ruleContext);
-      try {
-        resourceApk = applicationManifest.packWithDataAndResources(
-            ruleContext.getImplicitOutputArtifact(AndroidRuleClasses.ANDROID_RESOURCES_APK),
-            ruleContext,
-            ResourceDependencies.fromRuleDeps(ruleContext, JavaCommon.isNeverLink(ruleContext)),
-            ruleContext.getImplicitOutputArtifact(AndroidRuleClasses.ANDROID_R_TXT),
-            ruleContext.getImplicitOutputArtifact(AndroidRuleClasses.ANDROID_SYMBOLS_TXT),
-            ImmutableList.<String>of(), /* configurationFilters */
-            ImmutableList.<String>of(), /* uncompressedExtensions */
-            ImmutableList.<String>of(), /* densities */
-            null /* applicationId */,
-            null /* versionCode */,
-            null /* versionName */,
-            false,
-            null /* proguardCfgOut */);
-
-      } catch (RuleConfigurationException e) {
-        // RuleConfigurations exceptions will only be thrown after the RuleContext is updated.
-        // So, exit.
+      if (applicationManifest == null) {
+        return null;
+      }
+      resourceApk = applicationManifest.packWithDataAndResources(
+          ruleContext.getImplicitOutputArtifact(AndroidRuleClasses.ANDROID_RESOURCES_APK),
+          ruleContext,
+          ResourceDependencies.fromRuleDeps(ruleContext, JavaCommon.isNeverLink(ruleContext)),
+          ruleContext.getImplicitOutputArtifact(AndroidRuleClasses.ANDROID_R_TXT),
+          ruleContext.getImplicitOutputArtifact(AndroidRuleClasses.ANDROID_SYMBOLS_TXT),
+          ImmutableList.<String>of(), /* configurationFilters */
+          ImmutableList.<String>of(), /* uncompressedExtensions */
+          ImmutableList.<String>of(), /* densities */
+          null /* applicationId */,
+          null /* versionCode */,
+          null /* versionName */,
+          false,
+          null /* proguardCfgOut */);
+      if (ruleContext.hasErrors()) {
         return null;
       }
     } else {
@@ -125,6 +124,7 @@ public abstract class AndroidLibrary implements RuleConfiguredTargetFactory {
     final Aar aar;
     if (definesLocalResources) {
       primaryResources = resourceApk.getPrimaryResource();
+      // applicationManifest has already been checked for nullness above in this method
       ApplicationManifest applicationManifest = androidSemantics.getManifestForRule(ruleContext);
       aar = new Aar(aarOut, applicationManifest.getManifest());
       transitiveAars.add(aar);
@@ -215,8 +215,8 @@ public abstract class AndroidLibrary implements RuleConfiguredTargetFactory {
 
   private NestedSetBuilder<Aar> collectTransitiveAars(RuleContext ruleContext) {
     NestedSetBuilder<Aar> builder = NestedSetBuilder.naiveLinkOrder();
-    for (AndroidLibraryAarProvider library :
-        ruleContext.getPrerequisites("deps", Mode.TARGET, AndroidLibraryAarProvider.class)) {
+    for (AndroidLibraryAarProvider library : AndroidCommon.getTransitivePrerequisites(
+        ruleContext, Mode.TARGET, AndroidLibraryAarProvider.class)) {
       builder.addTransitive(library.getTransitiveAars());
     }
     return builder;

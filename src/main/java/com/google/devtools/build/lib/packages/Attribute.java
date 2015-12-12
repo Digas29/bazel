@@ -16,7 +16,6 @@ package com.google.devtools.build.lib.packages;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
-import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
@@ -34,6 +33,7 @@ import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.syntax.Type.ConversionException;
 import com.google.devtools.build.lib.util.FileType;
 import com.google.devtools.build.lib.util.FileTypeSet;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.util.StringUtil;
 
 import java.util.Arrays;
@@ -725,8 +725,33 @@ public final class Attribute implements Comparable<Attribute> {
      */
     public <T extends NativeAspectFactory> Builder<TYPE> aspect(
         Class<T> aspect, Function<Rule, AspectParameters> evaluator) {
-      this.aspects.add(new RuleAspect(new NativeAspectClass<T>(aspect), evaluator));
+      return this.aspect(new NativeAspectClass<T>(aspect), evaluator);
+    }
+
+    /**
+     * Asserts that a particular parameterized aspect probably needs to be computed for all direct
+     * dependencies through this attribute.
+     *
+     * @param evaluator function that extracts aspect parameters from rule.
+     */
+    public Builder<TYPE> aspect(AspectClass aspect, Function<Rule, AspectParameters> evaluator) {
+      this.aspects.add(new RuleAspect(aspect, evaluator));
       return this;
+    }
+
+    /**
+     * Asserts that a particular parameterized aspect probably needs to be computed for all direct
+     * dependencies through this attribute.
+     */
+    public Builder<TYPE> aspect(AspectClass aspect) {
+      Function<Rule, AspectParameters> noParameters =
+          new Function<Rule, AspectParameters>() {
+            @Override
+            public AspectParameters apply(Rule input) {
+              return AspectParameters.EMPTY;
+            }
+          };
+      return this.aspect(aspect, noParameters);
     }
 
     /**

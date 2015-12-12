@@ -35,10 +35,55 @@ import org.junit.runners.JUnit4;
 public class MethodLibraryTest extends EvaluationTestCase {
 
   @Before
-  @Override
-  public void setUp() throws Exception {
-    super.setUp();
+  public final void setFailFast() throws Exception {
     setFailFast(true);
+  }
+
+  @Test
+  public void testSplitLines_EmptyLine() throws Exception {
+    new SkylarkTest().testEval("''.splitlines()", "[]").testEval("'\\n'.splitlines()", "['']");
+  }
+
+  @Test
+  public void testSplitLines_StartsWithLineBreak() throws Exception {
+    new SkylarkTest().testEval("'\\ntest'.splitlines()", "['', 'test']");
+  }
+
+  @Test
+  public void testSplitLines_EndsWithLineBreak() throws Exception {
+    new SkylarkTest().testEval("'test\\n'.splitlines()", "['test']");
+  }
+
+  @Test
+  public void testSplitLines_DifferentLineBreaks() throws Exception {
+    new SkylarkTest().testEval(
+        "'this\\nis\\na\\ntest'.splitlines()", "['this', 'is', 'a', 'test']");
+  }
+
+  @Test
+  public void testSplitLines_OnlyLineBreaks() throws Exception {
+    new SkylarkTest()
+        .testEval("'\\n\\n\\n'.splitlines()", "['', '', '']")
+        .testEval("'\\r\\r\\r'.splitlines()", "['', '', '']")
+        .testEval("'\\n\\r\\n\\r'.splitlines()", "['', '', '']")
+        .testEval("'\\r\\n\\r\\n\\r\\n'.splitlines()", "['', '', '']");
+  }
+
+  @Test
+  public void testSplitLines_EscapedSequences() throws Exception {
+    new SkylarkTest().testEval("'\\n\\\\n\\\\\\n'.splitlines()", "['', '\\\\n\\\\']");
+  }
+
+  @Test
+  public void testSplitLines_KeepEnds() throws Exception {
+    new SkylarkTest()
+        .testEval("''.splitlines(True)", "[]")
+        .testEval("'\\n'.splitlines(True)", "['\\n']")
+        .testEval(
+            "'this\\nis\\r\\na\\rtest'.splitlines(True)", "['this\\n', 'is\\r\\n', 'a\\r', 'test']")
+        .testEval("'\\ntest'.splitlines(True)", "['\\n', 'test']")
+        .testEval("'test\\n'.splitlines(True)", "['test\\n']")
+        .testEval("'\\n\\\\n\\\\\\n'.splitlines(True)", "['\\n', '\\\\n\\\\\\n']");
   }
 
   @Test

@@ -19,7 +19,7 @@ filegroup(
 [genrule(
     name = "install_base_key-file" + suffix,
     srcs = [
-        "//src/main/java/com/google/devtools/build/lib:bazel-main_deploy.jar",
+        "//src/main/java/com/google/devtools/build/lib:bazel/BazelServer_deploy.jar",
         "//src/main/cpp:client",
         ":libunix",
         "//src/main/tools:build-runfiles",
@@ -74,6 +74,7 @@ genrule(
         "//third_party:srcs",
         "//src/java_tools/buildjar/java/com/google/devtools/build/buildjar/jarhelper:srcs",
         "//src/tools/android/java/com/google/devtools/build/android:embedded_tools",
+        "//src/tools/android/java/com/google/devtools/build/android/ideinfo:embedded_tools",
         "//src/tools/android/java/com/google/devtools/build/android/idlclass:embedded_tools",
         "//src/tools/android/java/com/google/devtools/build/android/incrementaldeployment:srcs",
         "//src/tools/android/java/com/google/devtools/build/android/ziputils:embedded_tools",
@@ -93,7 +94,7 @@ genrule(
         # The script assumes that the embedded tools zip (if exists) is the
         # first item here, the deploy jar the second and install base key is the
         # third
-        "//src/main/java/com/google/devtools/build/lib:bazel-main_deploy.jar",
+        "//src/main/java/com/google/devtools/build/lib:bazel/BazelServer_deploy.jar",
         "install_base_key" + suffix,
         "//src/main/cpp:client",
         ":libunix",
@@ -147,5 +148,11 @@ config_setting(
 config_setting(
     name = "freebsd",
     values = {"cpu": "freebsd"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "windows",
+    values = {"compiler": "windows_msys64"},
     visibility = ["//visibility:public"],
 )

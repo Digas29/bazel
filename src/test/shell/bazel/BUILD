@@ -63,7 +63,7 @@ filegroup(
         "//tools:srcs",
     ],
     visibility = [
-        "//src/test/shell/bazel:__subpackages__",
+        "//src/test/shell:__subpackages__",
     ],
 )
 
@@ -143,10 +143,13 @@ sh_test(
     name = "bazel_docgen_test",
     size = "large",
     srcs = ["bazel_docgen_test.sh"],
-    data = [
-        ":doc-srcs",
-        ":test-deps",
-    ],
+    data = ["//src/main/java/com/google/devtools/build/lib:gen_buildencyclopedia"],
+)
+
+sh_test(
+    name = "external_correctness_test",
+    srcs = ["external_correctness_test.sh"],
+    data = [":test-deps"],
 )
 
 sh_test(
@@ -172,6 +175,13 @@ sh_test(
     srcs = ["local_repository_test.sh"],
     data = [":test-deps"],
     shard_count = 3,
+)
+
+sh_test(
+    name = "skylark_repository_test",
+    size = "large",
+    srcs = ["skylark_repository_test.sh"],
+    data = [":test-deps"],
 )
 
 sh_test(
@@ -251,7 +261,7 @@ sh_test(
     srcs = ["bazel_worker_test.sh"],
     data = [
         ":test-deps",
-        "//src/test/java/com/google/devtools/build/lib:worker-example_deploy.jar",
+        "//src/test/java/com/google/devtools/build/lib:ExampleWorker_deploy.jar",
     ],
     tags = ["manual"],
 )

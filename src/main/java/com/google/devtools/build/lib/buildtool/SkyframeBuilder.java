@@ -14,7 +14,6 @@
 package com.google.devtools.build.lib.buildtool;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 import com.google.common.base.Supplier;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
@@ -51,6 +50,7 @@ import com.google.devtools.build.lib.skyframe.TargetCompletionValue;
 import com.google.devtools.build.lib.util.AbruptExitException;
 import com.google.devtools.build.lib.util.BlazeClock;
 import com.google.devtools.build.lib.util.LoggingUtil;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.ModifiedFileSet;
 import com.google.devtools.build.skyframe.CycleInfo;
 import com.google.devtools.build.skyframe.ErrorInfo;
@@ -234,12 +234,13 @@ public class SkyframeBuilder implements Builder {
         skyframeExecutor.reportCycles(eventHandler, cycles, entry.getKey());
         hasCycles |= !Iterables.isEmpty(cycles);
       }
-      if (keepGoing && !resultHasCatastrophicError(result)) {
+      boolean hasCatastrophe = resultHasCatastrophicError(result);
+      if (keepGoing && !hasCatastrophe) {
         return false;
       }
       if (hasCycles || result.errorMap().isEmpty()) {
         // error map may be empty in the case of a catastrophe.
-        throw new BuildFailedException();
+        throw new BuildFailedException(null, hasCatastrophe);
       } else {
         rethrow(Preconditions.checkNotNull(result.getError().getException()));
       }

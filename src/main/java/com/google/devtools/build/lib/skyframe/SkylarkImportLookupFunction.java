@@ -13,7 +13,6 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
-import com.google.common.base.Preconditions;
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableList;
@@ -32,10 +31,13 @@ import com.google.devtools.build.lib.packages.BuildFileNotFoundException;
 import com.google.devtools.build.lib.packages.PackageFactory;
 import com.google.devtools.build.lib.packages.RuleClassProvider;
 import com.google.devtools.build.lib.rules.SkylarkRuleClassFunctions;
+import com.google.devtools.build.lib.skyframe.SkylarkImportLookupValue.SkylarkImportLookupKey;
 import com.google.devtools.build.lib.syntax.BuildFileAST;
 import com.google.devtools.build.lib.syntax.Environment.Extension;
+import com.google.devtools.build.lib.syntax.EvalException;
 import com.google.devtools.build.lib.syntax.LoadStatement;
 import com.google.devtools.build.lib.syntax.Mutability;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyFunctionException;
@@ -76,9 +78,9 @@ public class SkylarkImportLookupFunction implements SkyFunction {
   @Override
   public SkyValue compute(SkyKey skyKey, Environment env) throws SkyFunctionException,
       InterruptedException {
-    Label fileLabel = (Label) skyKey.argument();
+    SkylarkImportLookupKey key = (SkylarkImportLookupKey) skyKey.argument();
     try {
-      return computeInternal(fileLabel, env, null);
+      return computeInternal(key.importLabel, key.inWorkspace, env, null);
     } catch (InconsistentFilesystemException e) {
       throw new SkylarkImportLookupFunctionException(e, Transience.PERSISTENT);
     } catch (SkylarkImportFailedException e) {
@@ -90,22 +92,23 @@ public class SkylarkImportLookupFunction implements SkyFunction {
       throws InconsistentFilesystemException,
           SkylarkImportFailedException,
           InterruptedException {
-    return computeWithInlineCallsInternal(
-        (Label) skyKey.argument(), env, new LinkedHashSet<Label>());
+    return computeWithInlineCallsInternal(skyKey, env, new LinkedHashSet<Label>());
   }
 
   private SkyValue computeWithInlineCallsInternal(
-      Label fileLabel, Environment env, Set<Label> visited)
-          throws InconsistentFilesystemException,
-              SkylarkImportFailedException,
-              InterruptedException {
-    return computeInternal(fileLabel, env, Preconditions.checkNotNull(visited, fileLabel));
+      SkyKey skyKey, Environment env, Set<Label> visited)
+      throws InconsistentFilesystemException, SkylarkImportFailedException, InterruptedException {
+    SkylarkImportLookupKey key = (SkylarkImportLookupKey) skyKey.argument();
+    return computeInternal(
+        key.importLabel,
+        key.inWorkspace,
+        env,
+        Preconditions.checkNotNull(visited, key.importLabel));
   }
 
-  SkyValue computeInternal(Label fileLabel, Environment env, @Nullable Set<Label> visited)
-      throws InconsistentFilesystemException,
-          SkylarkImportFailedException,
-          InterruptedException {
+  SkyValue computeInternal(
+      Label fileLabel, boolean inWorkspace, Environment env, @Nullable Set<Label> visited)
+      throws InconsistentFilesystemException, SkylarkImportFailedException, InterruptedException {
     PathFragment filePath = fileLabel.toPathFragment();
 
     // Load the AST corresponding to this file.
@@ -146,7 +149,7 @@ public class SkylarkImportLookupFunction implements SkyFunction {
     List<SkyKey> importLookupKeys =
         Lists.newArrayListWithExpectedSize(importLabels.size());
     for (Label importLabel : importLabels) {
-      importLookupKeys.add(SkylarkImportLookupValue.key(importLabel));
+      importLookupKeys.add(SkylarkImportLookupValue.key(importLabel, inWorkspace));
     }
     Map<SkyKey, SkyValue> skylarkImportMap;
     boolean valuesMissing = false;
@@ -167,9 +170,7 @@ public class SkylarkImportLookupFunction implements SkyFunction {
       }
       skylarkImportMap = Maps.newHashMapWithExpectedSize(loadStmts.size());
       for (SkyKey importLookupKey : importLookupKeys) {
-        SkyValue skyValue =
-            this.computeWithInlineCallsInternal(
-                (Label) importLookupKey.argument(), env, visited);
+        SkyValue skyValue = this.computeWithInlineCallsInternal(importLookupKey, env, visited);
         if (skyValue == null) {
           Preconditions.checkState(
               env.valuesMissing(), "no skylark import value for %s", importLookupKey);
@@ -193,7 +194,7 @@ public class SkylarkImportLookupFunction implements SkyFunction {
     for (Entry<PathFragment, Label> importEntry : importPathMap.entrySet()) {
       PathFragment importPath = importEntry.getKey();
       Label importLabel = importEntry.getValue();
-      SkyKey keyForLabel = SkylarkImportLookupValue.key(importLabel);
+      SkyKey keyForLabel = SkylarkImportLookupValue.key(importLabel, inWorkspace);
       SkylarkImportLookupValue importLookupValue =
           (SkylarkImportLookupValue) skylarkImportMap.get(keyForLabel);
       importMap.put(importPath, importLookupValue.getEnvironmentExtension());
@@ -201,7 +202,8 @@ public class SkylarkImportLookupFunction implements SkyFunction {
     }
     // Skylark UserDefinedFunction-s in that file will share this function definition Environment,
     // which will be frozen by the time it is returned by createExtension.
-    Extension extension = createExtension(ast, fileLabel, importMap, env);
+
+    Extension extension = createExtension(ast, fileLabel, importMap, env, inWorkspace);
 
     return new SkylarkImportLookupValue(
         extension, new SkylarkFileDependency(fileLabel, fileDependencies.build()));
@@ -362,8 +364,9 @@ public class SkylarkImportLookupFunction implements SkyFunction {
       BuildFileAST ast,
       Label extensionLabel,
       Map<PathFragment, Extension> importMap,
-      Environment env)
-          throws SkylarkImportFailedException, InterruptedException {
+      Environment env,
+      boolean inWorkspace)
+      throws SkylarkImportFailedException, InterruptedException {
     StoredEventHandler eventHandler = new StoredEventHandler();
     // TODO(bazel-team): this method overestimates the changes which can affect the
     // Skylark RuleClass. For example changes to comments or unused functions can modify the hash.
@@ -372,11 +375,16 @@ public class SkylarkImportLookupFunction implements SkyFunction {
     PathFragment extensionFile = extensionLabel.toPathFragment();
     try (Mutability mutability = Mutability.create("importing %s", extensionFile)) {
       com.google.devtools.build.lib.syntax.Environment extensionEnv =
-          ruleClassProvider.createSkylarkRuleClassEnvironment(
-              mutability, eventHandler, ast.getContentHashCode(), importMap)
-          .setupOverride("native", packageFactory.getNativeModule());
+          ruleClassProvider
+              .createSkylarkRuleClassEnvironment(
+                  mutability, eventHandler, ast.getContentHashCode(), importMap)
+              .setupOverride("native", packageFactory.getNativeModule(inWorkspace));
       ast.exec(extensionEnv, eventHandler);
-      SkylarkRuleClassFunctions.exportRuleFunctionsAndAspects(extensionEnv, extensionLabel);
+      try {
+        SkylarkRuleClassFunctions.exportRuleFunctionsAndAspects(extensionEnv, extensionLabel);
+      } catch (EvalException e) {
+        eventHandler.handle(Event.error(e.getLocation(), e.getMessage()));
+      }
 
       Event.replayEventsOn(env.getListener(), eventHandler.getEvents());
       if (eventHandler.hasErrors()) {
