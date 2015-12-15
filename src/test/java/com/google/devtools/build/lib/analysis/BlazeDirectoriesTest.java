@@ -13,14 +13,23 @@
 // limitations under the License.
 package com.google.devtools.build.lib.analysis;
 
+import static org.junit.Assert.assertEquals;
+
 import com.google.devtools.build.lib.testutil.FoundationTestCase;
 import com.google.devtools.build.lib.vfs.FileSystem;
 import com.google.devtools.build.lib.vfs.Path;
 
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.JUnit4;
+
 /**
  * Unit tests for {@link BlazeDirectories}.
  */
+@RunWith(JUnit4.class)
 public class BlazeDirectoriesTest extends FoundationTestCase {
+
+  @Test
   public void testCreatingDirectories() {
     FileSystem fs = scratch.getFileSystem();
     Path installBase = fs.getPath("/my/install");

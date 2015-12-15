@@ -35,9 +35,9 @@ import com.google.devtools.build.lib.packages.NoSuchTargetException;
 import com.google.devtools.build.lib.packages.Package;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.RuleClassProvider;
+import com.google.devtools.build.lib.packages.SkylarkAspectClass;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.rules.SkylarkRuleClassFunctions.SkylarkAspect;
-import com.google.devtools.build.lib.rules.SkylarkRuleClassFunctions.SkylarkAspectClass;
 import com.google.devtools.build.lib.skyframe.AspectValue.AspectKey;
 import com.google.devtools.build.lib.skyframe.ConfiguredTargetFunction.DependencyEvaluationException;
 import com.google.devtools.build.lib.skyframe.SkyframeExecutor.BuildViewProvider;
@@ -73,7 +73,7 @@ public final class AspectFunction implements SkyFunction {
       Environment env, Label extensionLabel, String skylarkValueName)
       throws ConversionException {
     
-    SkyKey importFileKey = SkylarkImportLookupValue.key(extensionLabel);
+    SkyKey importFileKey = SkylarkImportLookupValue.key(extensionLabel, false);
     SkylarkImportLookupValue skylarkImportLookupValue =
         (SkylarkImportLookupValue) env.getValue(importFileKey);
     if (skylarkImportLookupValue == null) {

@@ -23,8 +23,6 @@ import com.google.devtools.build.lib.packages.AspectParameters;
 import com.google.devtools.build.lib.packages.NativeAspectClass;
 import com.google.devtools.build.lib.skyframe.AspectValue;
 
-import org.junit.After;
-import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -34,17 +32,6 @@ import org.junit.runners.JUnit4;
  */
 @RunWith(JUnit4.class)
 public class AspectValueTest extends AnalysisTestCase {
-  @Override
-  @Before
-  public void setUp() throws Exception {
-    super.setUp();
-  }
-
-  @Override
-  @After
-  public void tearDown() throws Exception {
-    super.tearDown();
-  }
 
   @Test
   public void equality() throws Exception {

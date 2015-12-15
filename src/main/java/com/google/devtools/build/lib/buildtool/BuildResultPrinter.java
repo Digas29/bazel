@@ -39,7 +39,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 
 /**
- * Handles --show_results and --experimental_show_artifacts.
+ * Handles --show_result and --experimental_show_artifacts.
  */
 class BuildResultPrinter {
   private final CommandEnvironment env;
@@ -54,7 +54,7 @@ class BuildResultPrinter {
    * Shows the result of the build. Information includes the list of up-to-date
    * and failed targets and list of output artifacts for successful targets
    *
-   * <p>This corresponds to the --show_results flag.
+   * <p>This corresponds to the --show_result flag.
    */
   public void showBuildResult(
       BuildRequest request,
@@ -140,7 +140,7 @@ class BuildResultPrinter {
                 + OutputDirectoryLinksUtils.getPrettyPath(temp.getPath(),
                 runtime.getWorkspaceName(),
                 runtime.getWorkspace(),
-                request.getSymlinkPrefix()));
+                request.getBuildOptions().getSymlinkPrefix()));
           }
         }
       }
@@ -156,7 +156,8 @@ class BuildResultPrinter {
 
   private String formatArtifactForShowResults(Artifact artifact, BuildRequest request) {
     return "  " + OutputDirectoryLinksUtils.getPrettyPath(artifact.getPath(),
-        runtime.getWorkspaceName(), runtime.getWorkspace(), request.getSymlinkPrefix());
+        runtime.getWorkspaceName(), runtime.getWorkspace(),
+        request.getBuildOptions().getSymlinkPrefix());
   }
 
   /**

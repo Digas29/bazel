@@ -14,7 +14,7 @@
 """Rules for manipulation of various packaging."""
 
 # Filetype to restrict inputs
-tar_filetype = FileType([".tar", ".tar.gz", ".tgz", ".tar.xz"])
+tar_filetype = FileType([".tar", ".tar.gz", ".tgz", ".tar.xz", ".tar.bz2"])
 deb_filetype = FileType([".deb", ".udeb"])
 
 def _short_path_dirname(path):
@@ -89,7 +89,8 @@ def _pkg_deb_impl(ctx):
   """The implementation for the pkg_deb rule."""
   files = [ctx.file.data]
   args = [
-      "--output=" + ctx.outputs.out.path,
+      "--output=" + ctx.outputs.deb.path,
+      "--changes=" + ctx.outputs.changes.path,
       "--data=" + ctx.file.data.path,
       "--package=" + ctx.attr.package,
       "--architecture=" + ctx.attr.architecture,
@@ -155,9 +156,13 @@ def _pkg_deb_impl(ctx):
       executable = ctx.executable._make_deb,
       arguments = args,
       inputs = files,
-      outputs = [ctx.outputs.out],
+      outputs = [ctx.outputs.deb, ctx.outputs.changes],
       mnemonic="MakeDeb"
       )
+  ctx.action(
+      command = "ln -s %s %s" % (ctx.outputs.deb.basename, ctx.outputs.out.path),
+      inputs = [ctx.outputs.deb],
+      outputs = [ctx.outputs.out])
 
 # A rule for creating a tar file, see README.md
 pkg_tar = rule(
@@ -219,5 +224,7 @@ pkg_deb = rule(
     },
     outputs = {
         "out": "%{name}.deb",
+        "deb": "%{package}_%{version}_%{architecture}.deb",
+        "changes": "%{package}_%{version}_%{architecture}.changes"
     },
     executable = False)

@@ -19,9 +19,7 @@ import static com.google.devtools.build.lib.analysis.ExtraActionUtils.createExtr
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.UnmodifiableIterator;
-import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
@@ -119,11 +117,13 @@ public final class ConfiguredAspect implements Iterable<TransitiveInfoProvider> 
       return this;
     }
 
-    /**
-     * Adds a provider to the aspect. Shortcut for addProvider(value.getClass(), value).
-     */
-    public Builder addProvider(TransitiveInfoProvider value) {
-      return addProvider(value.getClass(), value);
+    public Builder addProviders(
+        Map<Class<? extends TransitiveInfoProvider>, TransitiveInfoProvider> providers) {
+      for (Map.Entry<Class<? extends TransitiveInfoProvider>, TransitiveInfoProvider> provider :
+          providers.entrySet()) {
+        addProvider(provider.getKey(), provider.getValue());
+      }
+      return this;
     }
 
     /**
@@ -165,9 +165,7 @@ public final class ConfiguredAspect implements Iterable<TransitiveInfoProvider> 
         providers.put(SkylarkProviders.class, new SkylarkProviders(skylarkProvidersMap));
       }
 
-      addProvider(createExtraActionProvider(
-          ImmutableSet.<Action>of() /* actionsWithoutExtraAction */,
-          ruleContext));
+      addProvider(ExtraActionArtifactsProvider.class, createExtraActionProvider(ruleContext));
 
       return new ConfiguredAspect(name, ImmutableMap.copyOf(providers));
     }

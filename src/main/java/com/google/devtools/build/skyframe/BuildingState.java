@@ -123,7 +123,7 @@ public class BuildingState {
   private boolean reverseDepIsSingleObject = false;
 
   private static final ReverseDepsUtil<BuildingState> REVERSE_DEPS_UTIL =
-      new ReverseDepsUtil<BuildingState>() {
+      new ReverseDepsUtilImpl<BuildingState>() {
         @Override
         void setReverseDepsObject(BuildingState container, Object object) {
           container.reverseDepsToSignal = object;
@@ -153,6 +153,12 @@ public class BuildingState {
         List<Object> getDataToConsolidate(BuildingState container) {
           return container.reverseDepsDataToConsolidate;
         }
+
+        @Override
+        public void consolidateReverseDeps(BuildingState container) {
+          // #consolidateReverseDeps is only supported for node entries, not building states.
+          throw new UnsupportedOperationException();
+        }
       };
 
   // Below are fields that are used for dirty nodes.
@@ -170,7 +176,7 @@ public class BuildingState {
    * Which child should be re-evaluated next in the process of determining if this entry needs to
    * be re-evaluated. Used by {@link #getNextDirtyDirectDeps} and {@link #signalDep(boolean)}.
    */
-  private Iterator<Iterable<SkyKey>> dirtyDirectDepIterator = null;
+  private Iterator<Collection<SkyKey>> dirtyDirectDepIterator = null;
 
   BuildingState() {
     lastBuildDirectDeps = null;
@@ -213,7 +219,7 @@ public class BuildingState {
    */
   boolean isReady() {
     int directDepsSize = directDeps.size();
-    Preconditions.checkState(signaledDeps <= directDepsSize, "%s %s", directDepsSize, this);
+    Preconditions.checkState(signaledDeps <= directDepsSize, "%s %s", directDeps, this);
     return signaledDeps == directDepsSize;
   }
 
@@ -348,8 +354,7 @@ public class BuildingState {
     Preconditions.checkState(dirtyState == DirtyState.CHECK_DEPENDENCIES, this);
     Preconditions.checkState(evaluating, this);
     Preconditions.checkState(dirtyDirectDepIterator.hasNext(), this);
-    List<SkyKey> nextDeps = ImmutableList.copyOf(dirtyDirectDepIterator.next());
-    return nextDeps;
+    return dirtyDirectDepIterator.next();
   }
 
   Collection<SkyKey> getAllRemainingDirtyDirectDeps() {
@@ -370,6 +375,10 @@ public class BuildingState {
 
   void addDirectDeps(GroupedListHelper<SkyKey> depsThisRun) {
     directDeps.append(depsThisRun);
+  }
+
+  void addDirectDepsGroup(Collection<SkyKey> group) {
+    directDeps.appendGroup(group);
   }
 
   /**

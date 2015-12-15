@@ -22,6 +22,7 @@ import static com.google.devtools.build.lib.packages.Attribute.ConfigurationTran
 import static com.google.devtools.build.lib.packages.Attribute.attr;
 import static com.google.devtools.build.lib.packages.BuildType.LABEL;
 import static com.google.devtools.build.lib.packages.BuildType.LABEL_LIST;
+import static org.junit.Assert.fail;
 
 import com.google.devtools.build.lib.actions.util.ActionsTestUtil.NullAction;
 import com.google.devtools.build.lib.analysis.util.AnalysisTestCase;
@@ -40,8 +41,6 @@ import com.google.devtools.build.lib.packages.AspectParameters;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.testutil.TestRuleClassProvider;
 
-import org.junit.After;
-import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -54,17 +53,6 @@ import org.junit.runners.JUnit4;
  */
 @RunWith(JUnit4.class)
 public class AspectTest extends AnalysisTestCase {
-  @Override
-  @Before
-  public void setUp() throws Exception {
-    super.setUp();
-  }
-
-  @Override
-  @After
-  public void tearDown() throws Exception {
-    super.tearDown();
-  }
 
   private final void setRules(RuleDefinition... rules) throws Exception {
     ConfiguredRuleClassProvider.Builder builder =
@@ -249,6 +237,7 @@ public class AspectTest extends AnalysisTestCase {
         Object lateBoundPrereq = ruleContext.getPrerequisite(":late", TARGET);
         return new ConfiguredAspect.Builder("testaspect", ruleContext)
             .addProvider(
+                AspectInfo.class,
                 new AspectInfo(
                     NestedSetBuilder.create(
                         Order.STABLE_ORDER, lateBoundPrereq != null ? "non-empty" : "empty")))
@@ -343,11 +332,10 @@ public class AspectTest extends AnalysisTestCase {
 
   @RunWith(JUnit4.class)
   public static class AspectTestWithoutLoading extends AspectTest {
+
     @Override
-    @Before
-    public void setUp() throws Exception {
-      disableLoading();
-      super.setUp();
+    protected boolean isLoadingEnabled() {
+      return false;
     }
   }
 }

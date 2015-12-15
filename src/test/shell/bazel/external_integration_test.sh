@@ -145,17 +145,21 @@ fi
   expect_log $what_does_the_fox_say
 
   if [[ $do_symlink = 1 ]]; then
-    if [[ -x ${realpath_path} ]]; then
-      realpath=${realpath_path}
-    else
-      realpath=realpath
-    fi
     base_external_path=bazel-out/../external/endangered/fox
-    assert_equals $(${realpath} ${base_external_path}/male) \
-      $(${realpath} ${base_external_path}/male_relative)
-    assert_equals $(${realpath} ${base_external_path}/male) \
-      $(${realpath} ${base_external_path}/male_absolute)
+    assert_files_same ${base_external_path}/male ${base_external_path}/male_relative
+    assert_files_same ${base_external_path}/male ${base_external_path}/male_absolute
   fi
+}
+
+function assert_files_same() {
+  assert_contains "$(cat $1)" $2 && return 0
+  echo "Expected these to be the same:"
+  echo "---------------------------"
+  cat $1
+  echo "==========================="
+  cat $2
+  echo "---------------------------"
+  return 1
 }
 
 function test_http_archive_zip() {
@@ -274,7 +278,8 @@ EOF
   expect_log $what_does_the_fox_say
 }
 
-function test_changed_zip() {
+# Pending proper external file handling
+function DISABLED_test_changed_zip() {
   nc_port=$(pick_random_unused_tcp_port) || fail "Couldn't get TCP port"
   http_archive_helper zip_up
   http_archive_helper zip_up "nowrite"
@@ -327,7 +332,6 @@ public class BallPit {
 }
 EOF
 
-  bazel fetch //zoo:ball-pit || fail "Fetch failed"
   bazel run //zoo:ball-pit >& $TEST_log || echo "Expected run to succeed"
   kill_nc
   expect_log "Tra-la!"
@@ -402,7 +406,6 @@ cat external/toto/file/toto
 EOF
 
   chmod +x test/test.sh
-  bazel fetch //test || fail "Fetch failed"
   bazel run //test >& $TEST_log || echo "Expected run to succeed"
   kill_nc
   expect_log "Tra-la!"
@@ -587,13 +590,13 @@ genrule(
 )
 EOF
 
-  bazel build @x//:catter || fail "Build failed"
+  bazel build @x//:catter &> $TEST_log || fail "Build 1 failed"
   assert_contains "abc" bazel-genfiles/external/x/catter.out
   mv x.BUILD x.BUILD.new || fail "Moving x.BUILD failed"
   sed 's/x.BUILD/x.BUILD.new/g' WORKSPACE > WORKSPACE.tmp || \
     fail "Editing WORKSPACE failed"
   mv WORKSPACE.tmp WORKSPACE
-  bazel build @x//:catter || fail "Build failed"
+  bazel build @x//:catter &> $TEST_log || fail "Build 2 failed"
   assert_contains "abc" bazel-genfiles/external/x/catter.out
 }
 
@@ -630,12 +633,12 @@ genrule(
 )
 EOF
 
-  bazel build @x//:catter || fail "Build failed"
+  bazel build @x//:catter || fail "Build 1 failed"
   assert_contains "abc" bazel-genfiles/external/x/catter.out
   sed 's/x.BUILD/x.BUILD.new/g' WORKSPACE > WORKSPACE.tmp || \
     fail "Editing WORKSPACE failed"
   mv WORKSPACE.tmp WORKSPACE
-  bazel build @x//:catter || fail "Build failed"
+  bazel build @x//:catter &> $TEST_log || fail "Build 2 failed"
   assert_contains "def" bazel-genfiles/external/x/catter.out
 }
 

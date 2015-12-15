@@ -13,9 +13,10 @@
 // limitations under the License.
 package com.google.devtools.build.lib.analysis.util;
 
+import static org.junit.Assert.fail;
+
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Root;
@@ -51,6 +52,10 @@ import com.google.devtools.common.options.Options;
 import com.google.devtools.common.options.OptionsBase;
 import com.google.devtools.common.options.OptionsParser;
 
+import org.junit.Before;
+import org.junit.runner.RunWith;
+import org.junit.runners.JUnit4;
+
 import java.lang.reflect.Field;
 import java.util.Collection;
 import java.util.HashMap;
@@ -61,6 +66,7 @@ import java.util.UUID;
 /**
  * Testing framework for tests which check ConfigurationFactory.
  */
+@RunWith(JUnit4.class)
 public abstract class ConfigurationTestCase extends FoundationTestCase {
 
   public static final class TestOptions extends OptionsBase {
@@ -78,9 +84,8 @@ public abstract class ConfigurationTestCase extends FoundationTestCase {
   protected Path workspace;
   protected ImmutableList<Class<? extends FragmentOptions>> buildOptionClasses;
 
-  @Override
-  protected void setUp() throws Exception {
-    super.setUp();
+  @Before
+  public final void initializeSkyframeExecutor() throws Exception {
     workspace = rootDirectory;
     ConfiguredRuleClassProvider ruleClassProvider = TestRuleClassProvider.getRuleClassProvider();
     PathPackageLocator pkgLocator =
@@ -100,7 +105,6 @@ public abstract class ConfigurationTestCase extends FoundationTestCase {
             BinTools.forUnitTesting(directories, TestConstants.EMBEDDED_TOOLS),
             workspaceStatusActionFactory,
             ruleClassProvider.getBuildInfoFactories(),
-            ImmutableSet.<Path>of(),
             ImmutableList.<DiffAwareness.Factory>of(),
             Predicates.<PathFragment>alwaysFalse(),
             Preprocessor.Factory.Supplier.NullSupplier.INSTANCE,

@@ -17,16 +17,20 @@ package com.google.devtools.build.lib.bazel.repository;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
-import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.bazel.rules.workspace.MavenServerRule;
 import com.google.devtools.build.lib.packages.AggregatingAttributeMapper;
 import com.google.devtools.build.lib.packages.Package;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.rules.repository.RepositoryFunction;
+import com.google.devtools.build.lib.rules.repository.RepositoryFunction.RepositoryFunctionException;
 import com.google.devtools.build.lib.skyframe.FileValue;
 import com.google.devtools.build.lib.syntax.Type;
+import com.google.devtools.build.lib.util.Fingerprint;
+import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.RootedPath;
+import com.google.devtools.build.skyframe.SkyFunction;
+import com.google.devtools.build.skyframe.SkyFunctionException;
 import com.google.devtools.build.skyframe.SkyFunctionException.Transience;
 import com.google.devtools.build.skyframe.SkyFunctionName;
 import com.google.devtools.build.skyframe.SkyKey;
@@ -49,20 +53,22 @@ import javax.annotation.Nullable;
 /**
  * Implementation of maven_repository.
  */
-public class MavenServerFunction extends RepositoryFunction {
+public class MavenServerFunction implements SkyFunction {
   public static final SkyFunctionName NAME = SkyFunctionName.create("MAVEN_SERVER_FUNCTION");
 
   private static final String USER_KEY = "user";
   private static final String SYSTEM_KEY = "system";
 
+  private final BlazeDirectories directories;
+
   public MavenServerFunction(BlazeDirectories directories) {
-    setDirectories(directories);
+    this.directories = directories;
   }
 
   @Nullable
-  @Override
-  public SkyValue compute(SkyKey skyKey, Environment env) throws RepositoryFunctionException {
-    String repository = skyKey.argument().toString();
+  public SkyValue compute(SkyKey skyKey, Environment env)
+      throws SkyFunctionException {
+    String repository = (String) skyKey.argument();
     Package externalPackage = RepositoryFunction.getExternalPackage(env);
     if (externalPackage == null) {
       return null;
@@ -94,7 +100,7 @@ public class MavenServerFunction extends RepositoryFunction {
       } else {
         PathFragment settingsFilePath = new PathFragment(mapper.get("settings_file", Type.STRING));
         RootedPath settingsPath = RootedPath.toRootedPath(
-            getWorkspace().getRelative(settingsFilePath), PathFragment.EMPTY_FRAGMENT);
+            directories.getWorkspace().getRelative(settingsFilePath), PathFragment.EMPTY_FRAGMENT);
         FileValue fileValue = (FileValue) env.getValue(FileValue.key(settingsPath));
         if (fileValue == null) {
           return null;
@@ -109,12 +115,31 @@ public class MavenServerFunction extends RepositoryFunction {
             USER_KEY, fileValue).build();
       }
     }
+
     if (settingsFiles == null) {
       return null;
     }
 
+    Fingerprint fingerprint = new Fingerprint();
+    try {
+      for (Map.Entry<String, FileValue> entry : settingsFiles.entrySet()) {
+        fingerprint.addString(entry.getKey());
+        Path path = entry.getValue().realRootedPath().asPath();
+        if (path.exists()) {
+          fingerprint.addBoolean(true);
+          fingerprint.addBytes(path.getMD5Digest());
+        } else {
+          fingerprint.addBoolean(false);
+        }
+      }
+    } catch (IOException e) {
+      throw new RepositoryFunctionException(e, Transience.TRANSIENT);
+    }
+
+    byte[] fingerprintBytes = fingerprint.digestAndReset();
+
     if (settingsFiles.isEmpty()) {
-      return new MavenServerValue(serverName, url, new Server());
+      return new MavenServerValue(serverName, url, new Server(), fingerprintBytes);
     }
 
     DefaultSettingsBuildingRequest request = new DefaultSettingsBuildingRequest();
@@ -143,7 +168,7 @@ public class MavenServerFunction extends RepositoryFunction {
     Settings settings = result.getEffectiveSettings();
     Server server = settings.getServer(serverName);
     server = server == null ? new Server() : server;
-    return new MavenServerValue(serverName, url, server);
+    return new MavenServerValue(serverName, url, server, fingerprintBytes);
   }
 
   private Map<String, FileValue> getDefaultSettingsFile(Environment env) {
@@ -154,7 +179,7 @@ public class MavenServerFunction extends RepositoryFunction {
     if (m2Home != null) {
       PathFragment mavenInstallSettings = new PathFragment(m2Home).getRelative("conf/settings.xml");
       systemKey = FileValue.key(
-          RootedPath.toRootedPath(getWorkspace().getRelative(mavenInstallSettings),
+          RootedPath.toRootedPath(directories.getWorkspace().getRelative(mavenInstallSettings),
               PathFragment.EMPTY_FRAGMENT));
       settingsFilesBuilder.add(systemKey);
     }
@@ -164,7 +189,8 @@ public class MavenServerFunction extends RepositoryFunction {
     SkyKey userKey = null;
     if (userHome != null) {
       PathFragment userSettings = new PathFragment(userHome).getRelative(".m2/settings.xml");
-      userKey = FileValue.key(RootedPath.toRootedPath(getWorkspace().getRelative(userSettings),
+      userKey = FileValue.key(RootedPath.toRootedPath(
+          directories.getWorkspace().getRelative(userSettings),
           PathFragment.EMPTY_FRAGMENT));
       settingsFilesBuilder.add(userKey);
     }
@@ -188,13 +214,9 @@ public class MavenServerFunction extends RepositoryFunction {
     return settingsBuilder.build();
   }
 
+  @Nullable
   @Override
-  public SkyFunctionName getSkyFunctionName() {
-    return NAME;
-  }
-
-  @Override
-  public Class<? extends RuleDefinition> getRuleDefinition() {
-    return MavenServerRule.class;
+  public String extractTag(SkyKey skyKey) {
+    return null;
   }
 }

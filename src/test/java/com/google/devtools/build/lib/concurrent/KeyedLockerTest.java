@@ -49,14 +49,14 @@ public abstract class KeyedLockerTest {
   protected abstract KeyedLocker<String> makeFreshLocker();
 
   @Before
-  public void setUp_KeyedLockerTest() {
+  public final void setUp_KeyedLockerTest() {
     locker = makeFreshLocker();
     executorService = Executors.newFixedThreadPool(NUM_EXECUTOR_THREADS);
     wrapper = new ThrowableRecordingRunnableWrapper("KeyedLockerTest");
   }
 
   @After
-  public void tearDown() {
+  public final void shutdownExecutor() throws Exception  {
     locker = null;
     MoreExecutors.shutdownAndAwaitTermination(executorService, TestUtils.WAIT_TIMEOUT_SECONDS,
         TimeUnit.SECONDS);
@@ -66,7 +66,7 @@ public abstract class KeyedLockerTest {
     return new Supplier<KeyedLocker.AutoUnlocker>() {
       @Override
       public AutoUnlocker get() {
-        return locker.lock(key);
+        return locker.writeLock(key);
       }
     };
   }

@@ -167,14 +167,14 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target> {
   }
 
   @Override
-  public QueryEvalResult evaluateQuery(QueryExpression expr, Callback<Target> callback)
+  public QueryEvalResult<Target> evaluateQuery(QueryExpression expr)
       throws QueryException, InterruptedException {
     // Some errors are reported as QueryExceptions and others as ERROR events (if --keep_going). The
     // result is set to have an error iff there were errors emitted during the query, so we reset
     // errors here.
     eventHandler.resetErrors();
     init();
-    return super.evaluateQuery(expr, callback);
+    return super.evaluateQuery(expr);
   }
 
   private Map<Target, Collection<Target>> makeTargetsMap(Map<SkyKey, Iterable<SkyKey>> input) {
@@ -248,7 +248,7 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target> {
     for (Collection<Target> parentCollection : rawReverseDeps.values()) {
       for (Target parent : parentCollection) {
         if (visited.add(parent)) {
-          if (parent instanceof Rule) {
+          if (parent instanceof Rule && dependencyFilter != Rule.ALL_DEPS) {
             for (Label label : getAllowedDeps((Rule) parent)) {
               if (keys.contains(label)) {
                 result.add(parent);
@@ -376,7 +376,7 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target> {
     }
   }
 
-  private static Target getSubincludeTarget(Label label, Package pkg) {
+  private static Target getSubincludeTarget(final Label label, Package pkg) {
     return new FakeSubincludeTarget(label, pkg);
   }
 
